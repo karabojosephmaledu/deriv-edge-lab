@@ -1,18 +1,259 @@
 <!doctype html>
 <html lang="en">
-  <!-- <html lang="en" class="dark"> — uncomment for dark-by-default (replace the tag above; `dark` is a Tailwind variant, never `@apply` it) -->
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="Deriv Edge Lab — a clean, premium digit-bot simulator for Deriv Volatility indices. Live market data, Matches/Differs simulation, zero real trades."
+    />
+    <title>Deriv Edge Lab — Deriv Digit Bot Simulator</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <!-- Fonts: Outfit (headings) + JetBrains Mono (data). System fallbacks apply if offline. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <header class="topbar" data-testid="app-header">
+      <div class="topbar-inner">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+          </span>
+          <span class="brand-name">Deriv Edge Lab</span>
+          <span class="badge badge-sim" data-testid="simulation-badge">Simulation only</span>
+        </div>
+        <div class="topbar-actions">
+          <span class="status-pill" id="connection-status" data-testid="connection-status" role="status">
+            <span class="dot dot-warn" id="status-dot"></span>
+            <span id="connection-status-text">Connecting…</span>
+          </span>
+          <button class="btn btn-outline btn-sm" id="connect-button-nav" data-testid="connect-button-nav" type="button">Connect</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell">
+      <!-- Account -->
+      <section class="card account-card" data-testid="account-card">
+        <div class="account-info">
+          <div class="card-kicker">Deriv Demo account</div>
+          <div id="account-empty">
+            <p class="muted account-copy">
+              Connect to display your authorized demo balance and currency. Your token never touches our servers —
+              it is sent only to Deriv, over an encrypted connection.
+            </p>
+            <button class="btn btn-primary" id="connect-button" data-testid="connect-button" type="button">Connect account</button>
+          </div>
+          <div id="account-live" hidden>
+            <div class="balance-row">
+              <span class="balance" id="balance-value" data-testid="balance-value">—</span>
+              <span class="currency" id="balance-currency" data-testid="balance-currency"></span>
+              <span class="badge badge-demo" id="account-type" data-testid="account-type">Demo</span>
+            </div>
+            <div class="account-meta muted">
+              <span id="account-loginid" data-testid="account-loginid"></span>
+              <button class="btn btn-ghost btn-sm" id="disconnect-button" data-testid="disconnect-button" type="button">Disconnect</button>
+            </div>
+          </div>
+        </div>
+        <div class="shield">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span>No real trades. Ever.</span>
+        </div>
+      </section>
+
+      <!-- Live market telemetry -->
+      <section class="card telemetry-card" data-testid="market-telemetry-card">
+        <div class="telemetry-head">
+          <div class="telemetry-market">
+            <div class="card-kicker">Live market</div>
+            <select class="select" id="symbol-select" data-testid="symbol-select" aria-label="Volatility index"></select>
+          </div>
+          <div class="quote-block" role="status" data-testid="current-quote">
+            <div class="card-kicker">Spot price</div>
+            <div class="quote"><span id="quote-main">—</span><span class="quote-digit" id="quote-digit"></span></div>
+            <div class="quote-meta muted" id="quote-meta">Connecting to Deriv…</div>
+          </div>
+        </div>
+        <div class="trail-wrap">
+          <div class="card-kicker">Last 10 digits</div>
+          <div class="trail" id="tick-trail" data-testid="tick-trail" aria-label="Last 10 tick digits"></div>
+        </div>
+      </section>
+
+      <!-- Main grid: strategy / digit matrix / session metrics -->
+      <div class="grid-main">
+        <section class="card strategy-card" data-testid="strategy-card">
+          <div class="card-kicker">Trade type</div>
+          <div class="seg" role="group" aria-label="Trade type" data-testid="trade-type-toggle">
+            <button class="seg-btn" id="trade-type-matches" data-testid="trade-type-matches" type="button" aria-pressed="false">Matches</button>
+            <button class="seg-btn" id="trade-type-differs" data-testid="trade-type-differs" type="button" aria-pressed="true">Differs</button>
+          </div>
+          <p class="hint" id="trade-type-description" data-testid="trade-type-description"></p>
+
+          <label class="field-label" for="stake-input">Fixed virtual stake</label>
+          <div class="stake-row">
+            <input class="input" id="stake-input" data-testid="stake-input" type="number" min="0.35" step="0.01" inputmode="decimal" value="1.00" />
+          </div>
+          <div class="chips" id="stake-chips">
+            <button class="chip" data-testid="stake-chip-1" data-stake="1" type="button">$1</button>
+            <button class="chip" data-testid="stake-chip-5" data-stake="5" type="button">$5</button>
+            <button class="chip" data-testid="stake-chip-10" data-stake="10" type="button">$10</button>
+            <button class="chip" data-testid="stake-chip-25" data-stake="25" type="button">$25</button>
+            <button class="chip" data-testid="stake-chip-50" data-stake="50" type="button">$50</button>
+            <button class="chip" data-testid="stake-chip-100" data-stake="100" type="button">$100</button>
+          </div>
+
+          <div class="payout-box" id="payout-info" data-testid="payout-info">
+            <span class="payout-mult" id="payout-mult">≈1.09×</span>
+            <span class="muted payout-detail" id="payout-detail">Estimating from live market…</span>
+          </div>
+        </section>
+
+        <section class="card matrix-card" data-testid="digit-matrix-card">
+          <div class="card-kicker">Select digit 0–9</div>
+          <div class="digit-grid" id="digit-grid" role="group" aria-label="Digit selection">
+            <button class="digit" type="button" data-testid="digit-button-0" data-digit="0" aria-pressed="false">0</button>
+            <button class="digit" type="button" data-testid="digit-button-1" data-digit="1" aria-pressed="false">1</button>
+            <button class="digit" type="button" data-testid="digit-button-2" data-digit="2" aria-pressed="false">2</button>
+            <button class="digit" type="button" data-testid="digit-button-3" data-digit="3" aria-pressed="false">3</button>
+            <button class="digit" type="button" data-testid="digit-button-4" data-digit="4" aria-pressed="false">4</button>
+            <button class="digit" type="button" data-testid="digit-button-5" data-digit="5" aria-pressed="false">5</button>
+            <button class="digit" type="button" data-testid="digit-button-6" data-digit="6" aria-pressed="false">6</button>
+            <button class="digit" type="button" data-testid="digit-button-7" data-digit="7" aria-pressed="false">7</button>
+            <button class="digit" type="button" data-testid="digit-button-8" data-digit="8" aria-pressed="false">8</button>
+            <button class="digit" type="button" data-testid="digit-button-9" data-digit="9" aria-pressed="false">9</button>
+          </div>
+          <p class="hint">Keys 0–9 pick a digit · ← → adjust.</p>
+          <div class="run-row">
+            <button class="btn btn-primary btn-lg" id="start-simulation-btn" data-testid="start-simulation-btn" type="button">Start simulation</button>
+            <button class="btn btn-stop btn-lg" id="stop-simulation-btn" data-testid="stop-simulation-btn" type="button" disabled>Stop</button>
+          </div>
+          <div class="run-indicator" id="running-indicator" data-testid="running-indicator" hidden>
+            <span class="pulse-dot"></span>Running — one simulated trade per tick
+          </div>
+        </section>
+
+        <section class="card metrics-card" data-testid="session-metrics-card">
+          <div class="card-kicker">Session</div>
+          <div class="metric-grid">
+            <div class="tile">
+              <span class="tile-label">Wins</span>
+              <span class="tile-value win" id="stat-wins" data-testid="stat-wins">0</span>
+            </div>
+            <div class="tile">
+              <span class="tile-label">Losses</span>
+              <span class="tile-value loss" id="stat-losses" data-testid="stat-losses">0</span>
+            </div>
+            <div class="tile">
+              <span class="tile-label">Win rate</span>
+              <span class="tile-value" id="stat-win-rate" data-testid="stat-win-rate">—</span>
+            </div>
+            <div class="tile">
+              <span class="tile-label">Net P/L</span>
+              <span class="tile-value" id="stat-pnl" data-testid="stat-pnl">$0.00</span>
+            </div>
+          </div>
+          <div class="metric-sub muted">
+            <span id="stat-trades" data-testid="stat-trades">0 trades</span>
+            <span>·</span>
+            <span id="stat-streak" data-testid="stat-streak">streak —</span>
+            <button class="btn btn-ghost btn-sm" id="reset-stats-btn" data-testid="reset-stats-btn" type="button">Reset</button>
+          </div>
+          <div class="sr-only" aria-live="polite" id="result-announcer" data-testid="result-announcer"></div>
+        </section>
+      </div>
+
+      <!-- History + frequency -->
+      <div class="grid-bottom">
+        <section class="card history-card" data-testid="trade-history-card">
+          <div class="card-kicker">Trade history</div>
+          <div class="table-wrap">
+            <table class="table" data-testid="trade-history-table">
+              <thead>
+                <tr>
+                  <th>Time</th><th>Market</th><th>Contract</th><th>Digits</th><th>Stake</th><th>P/L</th><th>Result</th>
+                </tr>
+              </thead>
+              <tbody id="trade-history-body" data-testid="trade-history-body"></tbody>
+            </table>
+            <p class="empty muted" id="trade-history-empty" data-testid="trade-history-empty">
+              No simulated trades yet — pick a digit and press Start.
+            </p>
+          </div>
+        </section>
+
+        <section class="card freq-card" data-testid="digit-frequency-card">
+          <div class="card-kicker">Digit frequency · last 100 ticks</div>
+          <div class="freq" id="digit-frequency" data-testid="digit-frequency"></div>
+        </section>
+      </div>
+
+      <footer class="disclaimer" data-testid="disclaimer">
+        Simulation only — Deriv Edge Lab never places real trades and never asks for your Deriv password.
+        Market data comes live from the Deriv WebSocket API; every outcome is simulated against the real last digit.
+        Not financial advice.
+      </footer>
+    </main>
+
+    <!-- Connect dialog -->
+    <dialog class="dialog" id="connect-dialog" data-testid="deriv-account-modal" aria-labelledby="connect-title">
+      <div class="dialog-inner">
+        <div class="dialog-head">
+          <h2 id="connect-title">Connect Deriv Demo account</h2>
+          <p class="dialog-sub">Deriv Edge Lab is a simulator — it never places trades on your account.</p>
+        </div>
+
+        <div class="oauth-block" id="oauth-block" hidden>
+          <button class="btn btn-primary btn-block" id="oauth-connect-button" data-testid="oauth-connect-button" type="button">
+            Login with Deriv
+          </button>
+          <p class="hint">
+            You approve access on deriv.com and return here automatically. Your password never touches this site —
+            Deriv sends back a scoped session token that stays in this browser.
+          </p>
+        </div>
+
+        <div class="oauth-block" id="oauth-setup-note" hidden>
+          <p class="hint">
+            <strong>Login with Deriv</strong> activates once this deployment uses a registered Deriv app_id
+            (set <code>DERIV_APP_ID</code> in the backend env; register the redirect
+            <code>&lt;origin&gt;/api/deriv/callback</code> at api.deriv.com). Until then, connect with a Demo API token below.
+          </p>
+        </div>
+
+        <div class="divider" id="token-divider"><span>or connect with an API token</span></div>
+
+        <form id="token-form" novalidate>
+          <label class="field-label" for="token-input">Demo API token</label>
+          <input class="input" id="token-input" data-testid="token-input" type="password" autocomplete="off" spellcheck="false" placeholder="a1-xxxxxxxxxxxxxxxxxxxx" />
+          <p class="hint">
+            In Deriv: <a data-testid="token-help-link" href="https://app.deriv.com/account/api-token" target="_blank" rel="noopener noreferrer">Settings → API token</a>.
+            Create a <strong>Read</strong>-scope token on your <strong>Demo</strong> account. It is stored only in this
+            browser tab and sent only to Deriv.
+          </p>
+          <p class="form-error" id="connect-error" data-testid="connect-error" hidden></p>
+          <div class="dialog-actions">
+            <button class="btn btn-ghost" type="button" id="connect-cancel-button" data-testid="connect-cancel-button">Cancel</button>
+            <button class="btn btn-primary" type="submit" id="token-connect-button" data-testid="token-connect-button">Connect</button>
+          </div>
+        </form>
+      </div>
+    </dialog>
+
+    <div class="toast-container" id="toast-container" data-testid="toast-container" aria-live="polite"></div>
+
+    <script src="/app.js" defer></script>
   </body>
 </html>

@@ -18,6 +18,9 @@ load_dotenv(ROOT_DIR / '.env')
 # MongoDB connection
 from lib.db import client, db, ensure_indexes
 
+# Resource routers (each exports its own APIRouter, mounted on api_router below)
+from routers.deriv import router as deriv_router
+
 
 # Startup runs before the yield, shutdown after it. Add your own setup/teardown here.
 @asynccontextmanager
@@ -62,6 +65,9 @@ async def create_status_check(input: StatusCheckCreate):
 async def get_status_checks():
     status_checks = await db.status_checks.find().to_list(1000)
     return [StatusCheck(**status_check) for status_check in status_checks]
+
+# Resource routers (each exports its own APIRouter)
+api_router.include_router(deriv_router)
 
 # Include the router in the main app
 app.include_router(api_router)

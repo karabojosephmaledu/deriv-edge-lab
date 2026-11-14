@@ -1,0 +1,246 @@
+{
+  "theme": "dark",
+  "theme_strategy": "Pure OLED black theme (#000000) with deep slate containers, electric cobalt/neon blue buttons & kinetic accents (#2563EB / #3B82F6), stark white typography (#FFFFFF), and vivid crimson (#EF4444) for loss/negative simulated states. Precision tactical minimalism tailored for Deriv Volatility Index digit trading simulation.",
+  "typography": {
+    "font_family_heading": "Outfit Variable, sans-serif",
+    "font_family_body": "JetBrains Mono Variable, monospace",
+    "font_family_mono": "JetBrains Mono Variable, monospace",
+    "font_source_import": "@import \"@fontsource-variable/outfit\";\n@import \"@fontsource-variable/jetbrains-mono\";",
+    "scale_px": {
+      "display": 48,
+      "h1": 36,
+      "h2": 24,
+      "h3": 18,
+      "body": 14,
+      "caption": 12
+    },
+    "weights": {
+      "display": "font-black tracking-tight",
+      "heading": "font-bold tracking-tight",
+      "subheading": "font-semibold tracking-normal",
+      "body": "font-normal",
+      "mono_data": "font-medium tracking-tight"
+    }
+  },
+  "colors": {
+    "surfaces": [
+      {
+        "name": "page",
+        "kind": "solid",
+        "bg": "#000000",
+        "on_bg": "#FFFFFF",
+        "on_bg_muted": "#94A3B8",
+        "roles": {
+          "link": "#60A5FA",
+          "error": "#EF4444",
+          "success": "#10B981",
+          "warning": "#F59E0B"
+        }
+      },
+      {
+        "name": "panel",
+        "kind": "solid",
+        "bg": "#090D14",
+        "on_bg": "#FFFFFF",
+        "on_bg_muted": "#94A3B8",
+        "roles": {
+          "border": "#1E293B",
+          "border_highlight": "#3B82F6",
+          "chip_bg": "#111827",
+          "error": "#EF4444",
+          "success": "#10B981"
+        }
+      },
+      {
+        "name": "card_elevated",
+        "kind": "solid",
+        "bg": "#0D131F",
+        "on_bg": "#F8FAFC",
+        "on_bg_muted": "#94A3B8",
+        "roles": {
+          "border": "#1E293B",
+          "hover_border": "#3B82F6"
+        }
+      },
+      {
+        "name": "header_nav",
+        "kind": "glass",
+        "contrast_against": "#05070B",
+        "guarantee": "backdrop-blur-xl bg-black/80 border-b border-white/10",
+        "on_bg": "#FFFFFF",
+        "on_bg_muted": "#94A3B8",
+        "roles": {
+          "badge_demo_bg": "#1E293B",
+          "badge_demo_text": "#93C5FD",
+          "badge_real_bg": "#064E3B",
+          "badge_real_text": "#34D399"
+        }
+      },
+      {
+        "name": "digit_tile_idle",
+        "kind": "solid",
+        "bg": "#0F172A",
+        "on_bg": "#E2E8F0",
+        "on_bg_muted": "#64748B"
+      },
+      {
+        "name": "digit_tile_selected",
+        "kind": "solid",
+        "bg": "#1D4ED8",
+        "on_bg": "#FFFFFF",
+        "on_bg_muted": "#BFDBFE"
+      },
+      {
+        "name": "digit_tile_last_tick",
+        "kind": "solid",
+        "bg": "#2563EB",
+        "on_bg": "#FFFFFF",
+        "on_bg_muted": "#DBEAFE"
+      },
+      {
+        "name": "loss_surface",
+        "kind": "solid",
+        "bg": "#1F0A0A",
+        "on_bg": "#FCA5A5",
+        "on_bg_muted": "#EF4444"
+      },
+      {
+        "name": "win_surface",
+        "kind": "solid",
+        "bg": "#062817",
+        "on_bg": "#6EE7B7",
+        "on_bg_muted": "#10B981"
+      }
+    ],
+    "accent": "#2563EB",
+    "on_accent": "#FFFFFF",
+    "secondary_accent": "#3B82F6",
+    "loss_accent": "#EF4444",
+    "win_accent": "#10B981"
+  },
+  "entry_surfaces": {
+    "/": "split-cockpit dashboard — header nav with Deriv account & token status, left panel live tick telemetry & digit distribution strip, center-right panel simulation execution engine with 0–9 digit matrix, Matches/Differs toggle & session ledger"
+  },
+  "layout_architecture": {
+    "container_type": "full-width responsive command cockpit with max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6",
+    "structure": [
+      {
+        "section": "Header / Navbar",
+        "pattern": "Sticky crystal glass (backdrop-blur-xl bg-black/85 border-b border-border/60)",
+        "content": "Deriv Edge Lab logo with pulse indicator + Deriv Demo badge + live account balance ($10,000.00 USD) + API Token / OAuth Connect Dialog trigger + Market Status indicator"
+      },
+      {
+        "section": "Live Market Telemetry Bar",
+        "pattern": "Bento row with Active Volatility Index selector (1HZ10V, 1HZ25V, 1HZ50V, 1HZ75V, 1HZ100V, R_10, R_25, R_50, R_75, R_100), current real-time tick price with flashing last digit, and 10-tick rolling digit trail"
+      },
+      {
+        "section": "Trading Control Engine (Main 12-col Grid)",
+        "pattern": "Mode B Dense Tactical Grid",
+        "col_breakdown": {
+          "left_control_column": "lg:col-span-4 space-y-4",
+          "center_digit_matrix": "lg:col-span-4 space-y-4",
+          "right_session_metrics": "lg:col-span-4 space-y-4"
+        }
+      },
+      {
+        "section": "Bottom Section: Real-time Execution Ledger & Live Digit Frequency",
+        "pattern": "2-column bento split (lg:grid-cols-12 gap-4): Col-span-7 trade history table with instant outcome badges & Col-span-5 interactive 0–9 frequency distribution bar chart"
+      }
+    ]
+  },
+  "interactive_components": {
+    "market_selector": {
+      "type": "Shadcn Select / Pill selector with Volatility indices",
+      "items": ["Volatility 10 (1s) Index", "Volatility 25 (1s) Index", "Volatility 50 (1s) Index", "Volatility 75 (1s) Index", "Volatility 100 (1s) Index", "Volatility 10 Index", "Volatility 100 Index"],
+      "test_id": "market-symbol-select"
+    },
+    "trade_type_toggle": {
+      "type": "Segmented Dual Control (Matches vs. Differs)",
+      "matches_description": "Win condition: Last digit EQUALS predicted digit (Payout ~9.5x virtual return)",
+      "differs_description": "Win condition: Last digit DIFFERS from predicted digit (Payout ~1.09x virtual return)",
+      "test_id": "trade-type-toggle"
+    },
+    "digit_selector_grid": {
+      "type": "10-button keypad grid (0 to 9) with large tactile numbers, selection glow, and hotkey support",
+      "test_id": "digit-select-button-"
+    },
+    "stake_input": {
+      "type": "Custom Shadcn Input with quick-stake chips ($1, $5, $10, $25, $50, $100)",
+      "test_id": "virtual-stake-input"
+    },
+    "simulation_action_buttons": {
+      "type": "High-visibility primary trigger: Start Simulation (Bright Blue / Electric Indigo), Stop Simulation (Crimson/Red outline or solid), Single Step Tick Test",
+      "test_ids": {
+        "start": "start-simulation-btn",
+        "stop": "stop-simulation-btn",
+        "single_step": "step-simulation-btn",
+        "reset_stats": "reset-stats-btn"
+      }
+    },
+    "account_modal": {
+      "type": "Shadcn Dialog for Deriv Connection (Demo API Token input, Demo/Real account switcher, WebSocket latency monitor, OAuth simulator)",
+      "test_id": "deriv-account-modal"
+    }
+  },
+  "motion_and_microinteractions": {
+    "tick_flash": "Flashing highlight (blue glow for match, subtle pulse) when a new tick arrives from Deriv WebSocket",
+    "digit_badge_pop": "Scale pop (scale-110 to scale-100) when the last tick digit matches the selected digit",
+    "win_burst": "Subtle green particle flash / glow border on win outcome",
+    "loss_pulse": "Clean crimson border pulse on simulated loss outcome",
+    "hover_states": "All buttons transition bg-color, border, and subtle shadow within 150ms",
+    "reduced_motion": "Prefers-reduced-motion media query disables scale transforms and keeps opacity transitions under 100ms"
+  },
+  "accessibility": {
+    "wcag_compliance": "AA rating across pure black #000000 background",
+    "contrast_ratios": {
+      "white_on_black": "21:1",
+      "blue_button_on_white_text": "5.2:1",
+      "red_loss_text_on_dark": "5.8:1",
+      "emerald_win_text_on_dark": "7.1:1",
+      "muted_text_on_panel": "5.6:1"
+    },
+    "aria_roles": "Proper role='status' for live tick stream, aria-pressed for digit grid buttons, aria-live='polite' for session P/L and result announcer",
+    "keyboard_nav": "Full arrow key navigation and 0-9 numpad shortcuts for digit picking"
+  },
+  "image_urls": [],
+  "component_structure": {
+    "page_entry": "/app/frontend/src/pages/Home.tsx",
+    "app_shell": "/app/frontend/src/App.tsx",
+    "css_theme_entry": "/app/frontend/src/index.css",
+    "custom_components": [
+      "/app/frontend/src/components/HeaderNav.tsx",
+      "/app/frontend/src/components/LiveTickStream.tsx",
+      "/app/frontend/src/components/DigitKeypad.tsx",
+      "/app/frontend/src/components/SimulationControls.tsx",
+      "/app/frontend/src/components/SessionMetricsCard.tsx",
+      "/app/frontend/src/components/TradeHistoryTable.tsx",
+      "/app/frontend/src/components/DigitFrequencyChart.tsx",
+      "/app/frontend/src/components/DerivAccountModal.tsx",
+      "/app/frontend/src/components/LivePriceChart.tsx",
+      "/app/frontend/src/lib/deriv-websocket.ts"
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Follow the user's explicit design requirement: Pure black background (#000000), Stark white text (#FFFFFF), Electric blue accents and buttons (#2563EB / #3B82F6), Crimson red for losses (#EF4444), and Emerald green for wins (#10B981).",
+    "Set the HTML class='dark' in frontend/index.html and configure index.css with Outfit and JetBrains Mono.",
+    "Implement real Deriv WebSocket connectivity (wss://ws.derivws.com/websockets/v3?app_id=1089 or custom token) for live ticks (R_10, R_25, R_50, R_75, R_100, 1HZ10V, 1HZ100V) with robust fallback live generator so it works seamlessly even if offline or without API token.",
+    "Support both Demo token connection and Quick Demo Simulation Mode (with $10,000 virtual balance).",
+    "Strictly enforce: This is a SIMULATOR. No real money trades are placed. All trades evaluate the real-time live last digit against the user's selected Matches or Differs condition.",
+    "Provide clear Matches (payout ~9.5x) vs Differs (payout ~1.09x) mathematical payout ratios in simulation.",
+    "Include a real-time Last-10 Digits visual strip and a 0–9 Digit Frequency Distribution bar chart using Recharts.",
+    "Add complete session statistics: Total Runs, Wins, Losses, Win Rate %, Virtual Profit/Loss ($ and %), Current Streak, and Peak Balance.",
+    "Implement a downloadable / clearable Trade History ledger with time, symbol, trade type, predicted digit, actual digit, stake, profit/loss, and timestamp.",
+    "Ensure every interactive element has kebab-case data-testid attributes."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered tactical borders (1px border-border/80) with crisp contrast.",
+    "You MUST NOT apply universal transition (e.g. transition: all). Add specific transitions for interactive elements.",
+    "You MUST NOT center align the app container — maintain natural left-aligned data reading flow.",
+    "Use modern pill-shaped or crisp sharp buttons with interaction animations.",
+    "NEVER use AI assistant emoji characters (🤖🧠💭💡🔮🎯) for icons — use Lucide icons only.",
+    "Every interaction needs micro-animations: hover states, tick pulses, badge changes.",
+    "Use generous spacing (gap-4, gap-6, p-6) to ensure the tactical dashboard feels spacious and uncrowded."
+  ]
+}
