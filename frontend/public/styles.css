@@ -677,6 +677,85 @@ button { font-family: inherit; }
   padding-top: 16px;
 }
 
+/* ---------------- Live trading / v2 additions ---------------- */
+
+.badge-live-blue { color: #fff; background: var(--accent); }
+.badge-live-red  { color: #fff; background: var(--loss); animation: pulse-dot 1.6s ease-in-out infinite; }
+
+.card-kicker.sub { margin-top: 18px; }
+
+.select-sm { min-width: 0; width: 100%; max-width: 340px; padding: 8px 12px; font-size: 13px; margin-top: 12px; }
+
+.digit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.digit-num { line-height: 1; }
+
+.digit-pay {
+  font: 600 10px/1 var(--font-mono);
+  color: var(--faint);
+  letter-spacing: 0;
+  transition: color 0.15s ease;
+}
+
+.digit-pay.live { color: var(--accent-soft); }
+.digit[aria-pressed="true"] .digit-pay { color: #dbeafe; }
+
+.matrix-card { position: relative; overflow: hidden; }
+
+.result-flash {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  animation: flash-in 1.4s ease forwards;
+  z-index: 5;
+}
+
+.result-flash .rf-mult { font: 800 clamp(48px, 9vw, 84px)/1 var(--font-heading); letter-spacing: -0.03em; }
+.result-flash .rf-txt { font: 700 16px/1 var(--font-mono); letter-spacing: 0.06em; }
+.result-flash.win .rf-mult { color: var(--win); text-shadow: 0 0 30px rgba(16, 185, 129, 0.6); }
+.result-flash.win .rf-txt { color: var(--win-soft); }
+.result-flash.loss .rf-mult { color: var(--loss); }
+.result-flash.loss .rf-txt { color: var(--loss-soft); }
+.result-flash.big .rf-mult { font-size: clamp(64px, 12vw, 112px); color: #60a5fa; text-shadow: 0 0 40px rgba(59, 130, 246, 0.8); }
+
+.risk-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.check-row input { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+
+.appid-block { margin-top: 4px; }
+.arm-title { color: var(--loss-soft); }
+
+@keyframes flash-in {
+  0% { opacity: 0; transform: scale(0.85); }
+  15% { opacity: 1; transform: scale(1.04); }
+  25% { transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 /* ---------------- Keyframes ---------------- */
 
 @keyframes pulse-dot {
@@ -711,7 +790,7 @@ button { font-family: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
   .digit-cell.newest, .quote-digit.flash, .tile.win-burst, .tile.loss-pulse,
-  .dot-live, .pulse-dot, .toast, .dialog[open] .dialog-inner {
+  .dot-live, .pulse-dot, .toast, .dialog[open] .dialog-inner, .result-flash, .badge-live-red {
     animation: none;
   }
   .digit:hover { transform: none; }

@@ -1,0 +1,86 @@
+{
+  "iteration": 1,
+  "mode": "generate",
+  "passed": 10,
+  "failed": 0,
+  "bugs": [],
+  "action_items": [],
+  "retest_needed": false,
+  "checks": [
+    {
+      "criterion": "Backend API - GET /api/deriv/config",
+      "name": "test_tscheck_deriv_config.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "GET /api/deriv/config -> 200 {app_id: 34XxijT4LuhpHEsZVPfoc, oauth_ready: true, oauth_authorize_url: https://auth.deriv.com/oauth2/auth, public_ws_url starts wss://}"
+    },
+    {
+      "criterion": "Backend API - GET /api/deriv/callback",
+      "name": "test_tscheck_deriv_callback.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "GET /api/deriv/callback?code=tscheck-code&state=tscheck-state -> 200 text/html bridge page containing location.replace(location.search...) to move params into SPA hash"
+    },
+    {
+      "criterion": "Backend API - POST /api/deriv/token validation/errors",
+      "name": "test_tscheck_deriv_token.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "bogus code + 48-char verifier + redirect_uri ending /api/deriv/callback -> 400 with detail; short verifier -> 422; redirect_uri not ending in /api/deriv/callback -> 400 with detail"
+    },
+    {
+      "criterion": "Live market data",
+      "name": "live-market-data-connects",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "connection-status reaches 'Live · R_100' within 25s, current-quote becomes numeric, tick-trail fills with digits; switching symbol-select re-subscribes and pill updates to new symbol. Also re-run successfully against the public preview URL https://deriv-edge-lab--3mg3a37k.preview.emergentagent.com"
+    },
+    {
+      "criterion": "Live payout ticker on digits",
+      "name": "digit-payout-ticker-live",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "digit-pay-5 drops its '≈' prefix once quotes arrive (~1.09x under Differs); switching to trade-type-matches updates digit-pay-5 to ~8.93x; payout-info box value ($8.93) matches selected digit-5 payout"
+    },
+    {
+      "criterion": "Simulate mode end to end",
+      "name": "simulate-mode-end-to-end",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Digit 5 + $5 stake + Start -> trade settles, result-flash shows big ×1.10 WIN overlay, trade-history-body row shows Mode 'Sim', stat-wins/losses/win-rate/pnl populate; Stop halts; Reset clears stat-wins/stat-losses back to 0"
+    },
+    {
+      "criterion": "Risk guard",
+      "name": "risk-guard-auto-stop",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Matches mode, digit 5, $5 stake, stop-loss=$2 (single loss exceeds threshold) -> toast-container shows a stop message and start-simulation-btn re-enables, confirming auto-stop fired"
+    },
+    {
+      "criterion": "Live trade gating without an account",
+      "name": "live-trade-gating-without-account",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Clicking trade-mode-live while disconnected opens deriv-account-modal; mode-badge stays 'Simulation' before and after cancelling the dialog; no buy call issued"
+    },
+    {
+      "criterion": "OAuth login start",
+      "name": "oauth-login-start",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Connect dialog shows oauth-connect-button and app-id-input prefilled '34XxijT4LuhpHEsZVPfoc'; clicking Login navigates to https://auth.deriv.com/oauth2/auth with response_type=code, client_id=34XxijT4LuhpHEsZVPfoc, redirect_uri=.../api/deriv/callback, scope=trade, state, code_challenge, code_challenge_method=S256 (navigation intercepted/stubbed, never actually hit auth.deriv.com)"
+    },
+    {
+      "criterion": "OAuth return + token errors handled",
+      "name": "oauth-return-and-token-errors",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Visiting /api/deriv/callback?code=bogus&state=x lands back at '/' with hash wiped and a toast shown, app chrome intact (no crash); invalid PAT in token-input + Connect shows connect-error containing 'reject'. One expected console 401 from api.derivws.com on the invalid-PAT negative test (per spec_deviations)."
+    }
+  ],
+  "notes": [
+    "Actual live trade execution (real buy/settlement on an authenticated Deriv account) is untestable without user credentials per spec_deviations; only gating (criterion 5) was verified.",
+    "8 acceptance_matrix criteria covered by 10 artifacts (3 backend test files under one 'Backend API' criterion + 7 browser checks).",
+    "All backend tests run against the live uvicorn server on :8001; all browser checks run against :3000, with live-market-data-connects additionally re-run against the public preview URL."
+  ]
+}

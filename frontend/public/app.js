@@ -2,18 +2,27 @@
  * Deriv Edge Lab — app.js
  *
  * Vanilla JavaScript. No frameworks, no build step, no dependencies.
+ * Built on the NEW Deriv API platform (developers.deriv.com).
  *
  * ARCHITECTURE
- *   - The browser connects DIRECTLY to Deriv's public WebSocket API
- *     (wss://ws.derivws.com/websockets/v3?app_id=<app_id>). Our backend is
- *     never in the market-data path.
- *   - Connection: "Login with Deriv" OAuth redirect (needs a registered
- *     app_id) or a Demo API token pasted into the dialog. Either way the
- *     token lives ONLY in this tab's sessionStorage and is sent ONLY to
- *     Deriv over TLS. Our servers never see it.
- *   - SIMULATOR: this app NEVER sends buy/sell. Every tick is scored against
- *     the chosen Matches/Differs condition as a virtual trade; payouts come
- *     from Deriv's live proposal quotes (no order is placed).
+ *   - Market data + live payout quotes: Deriv's PUBLIC WebSocket
+ *       wss://api.derivws.com/trading/v1/options/ws/public   (no auth)
+ *   - Sign-in, either:
+ *       a) "Login with Deriv" — OAuth2 Authorization Code + PKCE at
+ *          auth.deriv.com. The tiny backend only swaps the code for a token
+ *          (auth.deriv.com forbids browser CORS) and stores nothing.
+ *       b) A Personal Access Token (PAT) pasted in the dialog — fully
+ *          client-side, works even standalone on CodePen.
+ *     Tokens live ONLY in this tab's sessionStorage.
+ *   - Accounts: GET https://api.derivws.com/trading/v1/options/accounts
+ *     → the user picks Demo or Real in the account switcher.
+ *   - Trading: POST …/accounts/{id}/otp → one-time WebSocket URL for THAT
+ *     account → balance stream, `buy`, `proposal_open_contract`.
+ *   - TWO MODES:
+ *       Simulate   — scores every tick virtually; nothing is sent to Deriv.
+ *       Live trade — buys REAL 1-tick DIGITMATCH/DIGITDIFF contracts on the
+ *                    selected account. Demo = virtual funds. Real money
+ *                    needs an explicit red confirmation every session.
  * ========================================================================== */
 
 "use strict";
@@ -35,49 +44,61 @@ const SYMBOLS = [
   { code: "1HZ100V", name: "Volatility 100 (1s) Index" },
 ];
 
+/* Defaults keep the app fully working standalone (e.g. CodePen, no backend). */
 const DEFAULT_CONFIG = {
-  app_id: "1089", // Deriv's public test app_id
-  ws_url: "wss://ws.derivws.com/websockets/v3",
+  app_id: "",
+  public_ws_url: "wss://api.derivws.com/trading/v1/options/ws/public",
+  api_base: "https://api.derivws.com",
   oauth_ready: false,
-  oauth_url: null,
+  oauth_authorize_url: "https://auth.deriv.com/oauth2/auth",
 };
 
-/* Used only when the live proposal quote is unavailable (e.g. offline). */
+/* Used only until live proposal quotes arrive. */
 const FALLBACK_PAYOUTS = { matches: 8.7, differs: 1.09 };
 
-const HISTORY_LIMIT = 60; // rows kept in the ledger
-const TICK_TRAIL = 10; // digits shown in the strip
-const FREQ_WINDOW = 100; // ticks behind the frequency chart
+const HISTORY_LIMIT = 60;
+const TICK_TRAIL = 10;
+const FREQ_WINDOW = 100;
 const STAKE_MIN = 0.35;
 const STAKE_MAX = 5000;
-const TOKEN_KEY = "del.token";
+const MAX_OPEN_CONTRACTS = 2; // never pile up unsettled live buys
+
+const CRED_KEY = "del.cred"; // sessionStorage: { token, kind: "oauth"|"pat", expiresAt }
+const ACTIVE_KEY = "del.activeAccount"; // sessionStorage
+const PKCE_KEY = "del.pkce"; // sessionStorage: { verifier, state }
+const APPID_KEY = "del.appid"; // localStorage: optional App ID override
 
 /* --------------------------------- state --------------------------------- */
 
 const state = {
   cfg: { ...DEFAULT_CONFIG },
-  ws: null,
-  status: "connecting", // connecting | live | reconnecting | offline
-  reqId: 0,
-  pending: new Map(), // req_id -> { resolve, reject, timer }
-  pingTimer: null,
-  reconnectDelay: 1000,
-  intentionalClose: false,
-  feedAttempts: 0, // failed WS attempts before falling back to the demo feed
-  demoFeed: false, // true while the synthetic demo feed is running
+  pub: null, // public market socket
+  trade: null, // OTP trading socket for the active account
+  status: "connecting", // connecting | live | demo | reconnecting
+  feedAttempts: 0,
+  demoFeed: false,
   demoTimer: null,
   demoSymbol: null,
   demoPrice: 0,
-  authorized: false,
-  account: null, // { loginid, currency, balance, isVirtual }
-  settings: { symbol: "R_100", type: "differs", digit: 5, stake: 1.0 },
+  cred: null,
+  accounts: [], // [{ id, currency, balance, isVirtual }]
+  account: null, // active account (above shape), set once its trade socket opens
+  activeId: null,
+  connecting: false,
+  tradeRetryDelay: 1000,
+  tradeMode: "sim", // never persisted — every load starts in Simulate
+  realArmed: false, // session-only consent for real-money accounts
+  settings: { symbol: "R_100", type: "differs", digit: 5, stake: 1.0, smartEntry: true, tp: null, sl: null },
   running: false,
-  trail: [], // newest-first [{ quoteStr, digit, epoch }]
-  freq: new Array(10).fill(0), // rolling counts over FREQ_WINDOW
-  freqQueue: [], // digits currently inside the window
+  trail: [],
+  freq: new Array(10).fill(0),
+  freqQueue: [],
+  digitPayouts: new Array(10).fill(null),
+  payoutReqs: new Map(), // req_id -> digit
+  payoutGen: 0, // invalidates stale payout loops
   payout: { multiplier: FALLBACK_PAYOUTS.differs, source: "estimate" },
-  payoutReqId: null, // only accept proposal updates for the active request
-  payoutCooldownUntil: 0,
+  openContracts: new Map(), // contract_id -> { digit, type, stake, symbol }
+  inflightBuys: 0,
   stats: { trades: 0, wins: 0, losses: 0, net: 0, streak: 0 },
   history: [],
 };
@@ -95,6 +116,11 @@ function loadSettings() {
     if (Number.isInteger(d) && d >= 0 && d <= 9) state.settings.digit = d;
     const st = Number(s.stake);
     if (Number.isFinite(st)) state.settings.stake = clampStake(st);
+    state.settings.smartEntry = s.smartEntry !== false;
+    const tp = Number(s.tp);
+    state.settings.tp = Number.isFinite(tp) && tp > 0 ? tp : null;
+    const sl = Number(s.sl);
+    state.settings.sl = Number.isFinite(sl) && sl > 0 ? sl : null;
   } catch {
     /* corrupted settings are ignored — defaults stand */
   }
@@ -113,12 +139,42 @@ function clampStake(value) {
   return Math.min(STAKE_MAX, Math.max(STAKE_MIN, Math.round(value * 100) / 100));
 }
 
+function ssGet(key) {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function ssSet(key, value) {
+  try {
+    if (value == null) sessionStorage.removeItem(key);
+    else sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* private mode — memory only */
+  }
+}
+
 /* --------------------------------- config -------------------------------- */
 
+function getAppId() {
+  let override = "";
+  try {
+    override = (localStorage.getItem(APPID_KEY) || "").trim();
+  } catch {
+    /* ignore */
+  }
+  return override || state.cfg.app_id || "";
+}
+
+function oauthAvailable() {
+  // OAuth needs the backend (token exchange) and a registered App ID.
+  return state.cfg.oauth_ready && !!getAppId();
+}
+
 async function loadConfig() {
-  // The hosted app publishes its public config (app_id / OAuth readiness).
-  // Any failure (e.g. running standalone on CodePen) keeps the defaults —
-  // the app works fully without this call.
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 4000);
@@ -126,80 +182,123 @@ async function loadConfig() {
     clearTimeout(t);
     if (!res.ok) return;
     const data = await res.json();
-    if (data && typeof data.app_id === "string" && data.app_id) state.cfg.app_id = data.app_id;
-    if (data && typeof data.ws_url === "string" && data.ws_url) state.cfg.ws_url = data.ws_url;
-    state.cfg.oauth_ready = !!(data && data.oauth_ready && data.oauth_url);
-    state.cfg.oauth_url = (data && data.oauth_url) || null;
+    if (data && data.app_id && data.app_id !== "1089") state.cfg.app_id = String(data.app_id);
+    if (data && data.public_ws_url) state.cfg.public_ws_url = data.public_ws_url;
+    if (data && data.api_base) state.cfg.api_base = data.api_base;
+    if (data && data.oauth_authorize_url) state.cfg.oauth_authorize_url = data.oauth_authorize_url;
+    state.cfg.oauth_ready = !!(data && data.oauth_ready);
   } catch {
-    /* keep defaults */
+    /* standalone — keep defaults (PAT connect still works) */
   }
 }
 
-/* ------------------------------ token storage ---------------------------- */
-
-function getToken() {
-  try {
-    return sessionStorage.getItem(TOKEN_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
-function storeToken(token) {
-  try {
-    sessionStorage.setItem(TOKEN_KEY, token);
-  } catch {
-    /* private mode — token then lives in memory only for this page */
-  }
-}
-
-function clearToken() {
-  try {
-    sessionStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
-/* ----------------------------- OAuth redirect ---------------------------- */
+/* ---------------------------- generic socket ----------------------------- */
 
 /**
- * After "Login with Deriv", Deriv redirects to /api/deriv/callback#acct1=…
- * &token1=…&cur1=…. The backend bounces the #fragment to "/"; here we parse
- * it, prefer the Demo (VRTC…) account, store the token and clean the URL.
+ * One WebSocket with req_id routing. `onMessage` sees every message;
+ * request() resolves with the first response to its req_id.
  */
-function parseOAuthReturn() {
-  if (!location.hash || location.hash.length < 2) return false;
-  const params = new URLSearchParams(location.hash.slice(1));
-  const accounts = [];
-  for (let n = 1; n <= 25; n++) {
-    const loginid = params.get("acct" + n);
-    const token = params.get("token" + n);
-    const currency = params.get("cur" + n);
-    if (!loginid) break;
-    if (token) accounts.push({ loginid, token, currency: (currency || "USD").toUpperCase() });
-  }
-  if (!accounts.length) return false;
-  const demo = accounts.find((a) => a.loginid.startsWith("VRTC"));
-  const chosen = demo || accounts[0];
-  storeToken(chosen.token);
-  history.replaceState(null, "", location.pathname + location.search);
-  return true;
+function makeSocket(name, handlers) {
+  const sock = {
+    name,
+    ws: null,
+    reqId: 0,
+    pending: new Map(),
+    pingTimer: null,
+    closedByUs: false,
+    isOpen() {
+      return !!this.ws && this.ws.readyState === WebSocket.OPEN;
+    },
+    isBusy() {
+      return !!this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING);
+    },
+    open(url) {
+      this.closedByUs = false;
+      let ws;
+      try {
+        ws = new WebSocket(url);
+      } catch {
+        if (handlers.onClose) handlers.onClose(this);
+        return;
+      }
+      this.ws = ws;
+      ws.onopen = () => {
+        this.pingTimer = setInterval(() => {
+          if (this.isOpen()) this.request({ ping: 1 }).catch(() => {});
+        }, 30000);
+        if (handlers.onOpen) handlers.onOpen(this);
+      };
+      ws.onmessage = (ev) => {
+        let msg;
+        try {
+          msg = JSON.parse(ev.data);
+        } catch {
+          return;
+        }
+        const entry = msg.req_id != null ? this.pending.get(msg.req_id) : null;
+        if (entry) {
+          clearTimeout(entry.timer);
+          this.pending.delete(msg.req_id);
+          if (msg.error) entry.reject(msg.error);
+          else entry.resolve(msg);
+        }
+        if (handlers.onMessage) handlers.onMessage(msg, this);
+      };
+      ws.onerror = () => {
+        /* onclose always follows */
+      };
+      ws.onclose = () => {
+        clearInterval(this.pingTimer);
+        this.pingTimer = null;
+        for (const [, e] of this.pending) {
+          clearTimeout(e.timer);
+          e.reject(new Error("socket-closed"));
+        }
+        this.pending.clear();
+        if (this.ws === ws) this.ws = null;
+        if (!this.closedByUs && handlers.onClose) handlers.onClose(this);
+      };
+    },
+    close() {
+      this.closedByUs = true;
+      if (this.ws) {
+        try {
+          this.ws.close();
+        } catch {
+          /* ignore */
+        }
+      }
+      this.ws = null;
+    },
+    request(payload, timeoutMs = 20000) {
+      return new Promise((resolve, reject) => {
+        if (!this.isOpen()) {
+          reject(new Error("socket-closed"));
+          return;
+        }
+        const req_id = ++this.reqId;
+        const entry = { resolve, reject, timer: null };
+        entry.timer = setTimeout(() => {
+          this.pending.delete(req_id);
+          reject(new Error("timeout"));
+        }, timeoutMs);
+        this.pending.set(req_id, entry);
+        try {
+          this.ws.send(JSON.stringify({ ...payload, req_id }));
+        } catch (err) {
+          clearTimeout(entry.timer);
+          this.pending.delete(req_id);
+          reject(err);
+        }
+      });
+    },
+  };
+  return sock;
 }
 
-function startOAuth() {
-  if (!state.cfg.oauth_ready) {
-    openConnectDialog();
-    return;
-  }
-  window.location.href = state.cfg.oauth_url;
-}
+/* --------------------------- public market socket ------------------------ */
 
-/* ------------------------------ WebSocket core --------------------------- */
-
-function wsOpen() {
-  return state.ws && state.ws.readyState === WebSocket.OPEN;
-}
+let pubRetryDelay = 1000;
 
 function setStatus(status) {
   state.status = status;
@@ -212,263 +311,58 @@ function setStatus(status) {
   } else if (status === "demo") {
     dot.classList.add("dot-warn");
     text.textContent = "Demo feed · " + state.settings.symbol;
-  } else if (status === "connecting") {
-    dot.classList.add("dot-warn");
-    text.textContent = "Connecting…";
   } else if (status === "reconnecting") {
     dot.classList.add("dot-warn");
     text.textContent = "Reconnecting…";
   } else {
-    dot.classList.add("dot-off");
-    text.textContent = "Offline";
+    dot.classList.add("dot-warn");
+    text.textContent = "Connecting…";
   }
 }
 
-function scheduleReconnect() {
-  if (state.intentionalClose) return;
-  const jitter = Math.random() * 400;
-  setTimeout(connectWs, state.reconnectDelay + jitter);
-  state.reconnectDelay = Math.min(state.reconnectDelay * 2, 30000);
+function connectPublic() {
+  if (state.pub && state.pub.isBusy()) return;
+  setStatus(state.demoFeed ? "demo" : state.pub ? "reconnecting" : "connecting");
+  if (!state.pub) {
+    state.pub = makeSocket("public", {
+      onOpen: () => {
+        pubRetryDelay = 1000;
+        state.feedAttempts = 0;
+        stopDemoTimer();
+        setStatus("live");
+        subscribeTicks(state.settings.symbol);
+        subscribePayouts();
+      },
+      onMessage: onPublicMessage,
+      onClose: () => {
+        state.feedAttempts += 1;
+        if (state.feedAttempts >= 3 || state.demoFeed) {
+          if (!state.demoFeed) startDemoFeed();
+          setStatus("demo");
+        } else {
+          setStatus("reconnecting");
+        }
+        setTimeout(connectPublic, pubRetryDelay + Math.random() * 400);
+        pubRetryDelay = Math.min(pubRetryDelay * 2, 30000);
+      },
+    });
+  }
+  state.pub.open(state.cfg.public_ws_url);
 }
 
-function startPing() {
-  stopPing();
-  state.pingTimer = setInterval(() => {
-    if (wsOpen()) request({ ping: 1 }).catch(() => {});
-  }, 30000);
-}
-
-function stopPing() {
-  if (state.pingTimer) {
-    clearInterval(state.pingTimer);
-    state.pingTimer = null;
-  }
-}
-
-function connectWs() {
-  if (state.ws && (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING)) return;
-  setStatus(state.demoFeed ? "demo" : state.ws ? "reconnecting" : "connecting");
-  state.intentionalClose = false;
-
-  let ws;
-  try {
-    ws = new WebSocket(state.cfg.ws_url + "?app_id=" + encodeURIComponent(state.cfg.app_id));
-  } catch {
-    scheduleReconnect();
-    return;
-  }
-  state.ws = ws;
-
-  ws.onopen = () => {
-    state.reconnectDelay = 1000;
-    state.feedAttempts = 0;
-    stopDemoTimer(); // real data is back — drop the synthetic feed
-    setStatus("live");
-    startPing();
-    const token = getToken();
-    if (token) {
-      authorize(token);
-    } else {
-      subscribeTicks(state.settings.symbol);
-      refreshPayout();
-    }
-  };
-
-  ws.onmessage = (ev) => {
-    let msg;
-    try {
-      msg = JSON.parse(ev.data);
-    } catch {
-      return;
-    }
-    routeMessage(msg);
-  };
-
-  ws.onerror = () => {
-    /* onclose always follows; reconnect logic lives there */
-  };
-
-  ws.onclose = () => {
-    stopPing();
-    failAllPending("socket-closed");
-    state.authorized = false;
-    state.account = null;
-    renderAccount();
-    state.feedAttempts += 1;
-    if (state.feedAttempts >= 3 || state.demoFeed) {
-      if (!state.demoFeed) startDemoFeed(); // Deriv unreachable here — labeled synthetic feed
-      setStatus("demo");
-    } else {
-      setStatus("reconnecting");
-    }
-    scheduleReconnect();
-  };
-}
-
-/**
- * Sends one request with a unique req_id and resolves with its first
- * response. Stream updates arrive later via routeMessage().
- * NOTE: trading calls (buy/sell) are deliberately refused — this is a
- * simulator and must never place a trade.
- */
-function request(payload, timeoutMs = 20000) {
-  return new Promise((resolve, reject) => {
-    if (!wsOpen()) {
-      reject(new Error("socket-closed"));
-      return;
-    }
-    const body = { ...payload };
-    if ("buy" in body || "sell" in body) {
-      reject(new Error("trading calls are disabled in this simulator"));
-      return;
-    }
-    const req_id = ++state.reqId;
-    const entry = { resolve, reject, timer: null };
-    entry.timer = setTimeout(() => {
-      state.pending.delete(req_id);
-      reject(new Error("timeout"));
-    }, timeoutMs);
-    state.pending.set(req_id, entry);
-    try {
-      state.ws.send(JSON.stringify({ ...body, req_id }));
-    } catch (err) {
-      clearTimeout(entry.timer);
-      state.pending.delete(req_id);
-      reject(err);
-    }
-  });
-}
-
-function failAllPending(reason) {
-  for (const [, entry] of state.pending) {
-    clearTimeout(entry.timer);
-    entry.reject(new Error(reason));
-  }
-  state.pending.clear();
-}
-
-function routeMessage(msg) {
-  const isError = !!msg.error;
-  const entry = msg.req_id != null ? state.pending.get(msg.req_id) : null;
-
-  if (isError) handleApiError(msg.error);
-
-  if (entry) {
-    clearTimeout(entry.timer);
-    state.pending.delete(msg.req_id);
-    if (isError) entry.reject(msg.error);
-    else entry.resolve(msg);
-  }
-
-  if (isError) return;
-
-  switch (msg.msg_type) {
-    case "tick":
-      if (msg.tick) onTick(msg.tick);
-      break;
-    case "balance":
-      if (msg.balance) onBalance(msg.balance);
-      break;
-    case "proposal":
-      if (msg.proposal && msg.req_id === state.payoutReqId) onProposal(msg.proposal);
-      break;
-    default:
-      break; // ping, forget_all, …
-  }
-}
-
-function handleApiError(err) {
-  const code = err && err.code ? err.code : "";
-  const message = (err && err.message) || "Something went wrong talking to Deriv.";
-
-  if (code === "InvalidToken" || code === "AuthorizationRequired") {
-    clearToken();
-    state.authorized = false;
-    state.account = null;
-    renderAccount();
-    toast("That token was rejected — please connect again.", "error");
-    openConnectDialog(message);
-    return;
-  }
-  if (code === "RateLimits" || code === "RateLimitExceeded") {
-    state.payoutCooldownUntil = Date.now() + 30000;
-    state.payout = { multiplier: FALLBACK_PAYOUTS[state.settings.type], source: "estimate" };
-    renderPayout();
-    return;
-  }
-  if (code === "AlreadySubscribed") return;
-
-  // Surface anything else in the connect dialog if the user is waiting there.
-  const dialog = $("connect-dialog");
-  if (dialog.open) showConnectError(message);
-}
-
-/* ------------------------------- connection ------------------------------ */
-
-async function authorize(token) {
-  try {
-    const res = await request({ authorize: token });
-    const a = res.authorize || {};
-    state.authorized = true;
-    const isVirtual =
-      a.is_virtual === 1 || a.is_virtual === true || String(a.loginid || "").startsWith("VRTC");
-    state.account = {
-      loginid: a.loginid || "",
-      currency: a.currency || "USD",
-      balance: Number(a.balance) || 0,
-      isVirtual,
-    };
-    renderAccount();
-    toast("Connected to " + state.account.loginid, "success");
-    request({ balance: 1, subscribe: 1 }).catch(() => {});
-    subscribeTicks(state.settings.symbol);
-    refreshPayout();
-    closeConnectDialog();
-    return true;
-  } catch {
-    return false; // handleApiError already showed the reason
-  }
-}
-
-async function connectWithToken() {
-  const input = $("token-input");
-  const token = input.value.trim();
-  if (!token) {
-    showConnectError("Paste your Demo API token first.");
-    return;
-  }
-  storeToken(token);
-  if (!wsOpen()) {
-    connectWs();
-    if (state.demoFeed) {
-      clearToken();
-      showConnectError("Deriv is unreachable from this network, so the token can't be verified right now. The labeled demo feed keeps the simulator running; live connect works from a network that can reach Deriv.");
-    } else {
-      showConnectError("");
-      toast("Connecting to Deriv…", "info");
+function onPublicMessage(msg) {
+  if (msg.error) {
+    const code = msg.error.code || "";
+    if (code === "RateLimit" || code === "RateLimits" || code === "RateLimitExceeded") {
+      toast("Deriv rate limit hit — payouts show estimates briefly.", "info");
     }
     return;
   }
-  const ok = await authorize(token);
-  if (!ok) {
-    clearToken();
-    input.value = "";
+  if (msg.msg_type === "tick" && msg.tick) onTick(msg.tick);
+  else if (msg.msg_type === "proposal" && msg.proposal && state.payoutReqs.has(msg.req_id)) {
+    applyDigitProposal(msg.req_id, msg.proposal);
   }
 }
-
-function disconnect() {
-  clearToken();
-  state.authorized = false;
-  state.account = null;
-  if (wsOpen()) {
-    request({ logout: 1 }).catch(() => {});
-    request({ forget_all: "balance" }).catch(() => {});
-  }
-  renderAccount();
-  toast("Disconnected — token cleared from this browser.", "info");
-}
-
-/* ------------------------------ subscriptions ---------------------------- */
 
 function resetFeedState() {
   state.trail = [];
@@ -481,29 +375,28 @@ function resetFeedState() {
 
 async function subscribeTicks(symbol) {
   if (state.demoFeed) {
-    startDemoTimer(symbol); // stay on the synthetic feed until Deriv is reachable
+    startDemoTimer(symbol);
     return;
   }
-  if (!wsOpen()) return;
+  if (!state.pub || !state.pub.isOpen()) return;
   try {
-    await request({ forget_all: "ticks" }, 10000);
+    await state.pub.request({ forget_all: "ticks" }, 10000);
   } catch {
-    /* socket may be going away; resubscribe below regardless */
+    /* resubscribe regardless */
   }
   resetFeedState();
   setStatus("live");
   try {
-    await request({ ticks: symbol, subscribe: 1 });
-  } catch {
-    /* error already surfaced by handleApiError */
+    await state.pub.request({ ticks: symbol, subscribe: 1 });
+  } catch (err) {
+    toast("Could not subscribe to " + symbol + ": " + errText(err), "error");
   }
 }
 
 /* ------------------------- synthetic demo feed ----------------------------
- * Runs ONLY when Deriv's gateway is unreachable from the current network
- * (some datacenter/hosting IPs are rejected by Deriv's edge). It is labeled
- * "Demo feed" everywhere it shows, and live data resumes automatically on
- * the first successful WebSocket connection.
+ * Runs ONLY when Deriv's public gateway is unreachable from this network.
+ * Labeled "Demo feed" everywhere; live data resumes automatically.
+ * Live trading never runs on it (buys need the real account socket).
  * ------------------------------------------------------------------------- */
 
 const DEMO_BASES = {
@@ -511,7 +404,7 @@ const DEMO_BASES = {
   R_25: { price: 2712.883, pip: 3 },
   R_50: { price: 246.9142, pip: 4 },
   R_75: { price: 85432.1057, pip: 4 },
-  R_100: { price: 6362.3452, pip: 2 },
+  R_100: { price: 572.26, pip: 2 },
   "1HZ10V": { price: 9841.22, pip: 2 },
   "1HZ25V": { price: 5123.882, pip: 3 },
   "1HZ50V": { price: 245.1188, pip: 4 },
@@ -522,10 +415,7 @@ const DEMO_BASES = {
 function startDemoFeed() {
   if (state.demoFeed) return;
   startDemoTimer(state.settings.symbol);
-  toast(
-    "Deriv is unreachable from this network — running a clearly-labeled synthetic demo feed. Live data resumes automatically once Deriv is reachable.",
-    "info"
-  );
+  toast("Deriv is unreachable from this network — showing a labeled demo feed until it's back.", "info");
 }
 
 function startDemoTimer(symbol) {
@@ -536,85 +426,394 @@ function startDemoTimer(symbol) {
   state.demoPrice = base.price;
   resetFeedState();
   setStatus("demo");
-  const cadence = symbol.indexOf("1HZ") === 0 ? 1000 : 2000; // matches real tick cadence
+  const cadence = symbol.indexOf("1HZ") === 0 ? 1000 : 2000;
   state.demoTimer = setInterval(() => {
-    const drift = (Math.random() - 0.5) * 0.0016;
-    state.demoPrice = Math.max(0.0001, state.demoPrice * (1 + drift));
-    onTick({
-      quote: state.demoPrice,
-      pip_size: base.pip,
-      epoch: Math.floor(Date.now() / 1000),
-      symbol: state.demoSymbol,
-    });
+    state.demoPrice = Math.max(0.0001, state.demoPrice * (1 + (Math.random() - 0.5) * 0.0016));
+    onTick({ quote: state.demoPrice, pip_size: base.pip, epoch: Math.floor(Date.now() / 1000), symbol: state.demoSymbol });
   }, cadence);
 }
 
 function stopDemoTimer() {
-  if (state.demoTimer) {
-    clearInterval(state.demoTimer);
-    state.demoTimer = null;
-  }
+  if (state.demoTimer) clearInterval(state.demoTimer);
+  state.demoTimer = null;
   state.demoFeed = false;
 }
 
-/* ------------------------------ live payouts ----------------------------- */
+/* ---------------------- live payout ticker (all digits) ------------------ */
 
 let payoutDebounce = null;
 
-/**
- * Asks Deriv for a LIVE proposal quote for the current configuration.
- * proposal ≠ trade: it is a price quote only — nothing is ever bought.
- * `underlying_symbol` + `barrier` ("0"–"9") + 1-tick duration per the
- * digit Matches/Differs contract spec.
- */
-function refreshPayout() {
+function keepPayoutsFresh() {
   clearTimeout(payoutDebounce);
-  payoutDebounce = setTimeout(async () => {
-    const s = state.settings;
-    if (!wsOpen() || Date.now() < state.payoutCooldownUntil) {
-      state.payout = { multiplier: FALLBACK_PAYOUTS[s.type], source: "estimate" };
-      renderPayout();
-      return;
-    }
+  payoutDebounce = setTimeout(subscribePayouts, 500);
+}
+
+/**
+ * Streams a live proposal quote for EVERY digit 0–9 so each button shows its
+ * real current payout multiplier. Quotes only — nothing is bought here.
+ */
+async function subscribePayouts() {
+  const gen = ++state.payoutGen;
+  state.digitPayouts = new Array(10).fill(null);
+  renderDigitPayouts();
+  renderPayout();
+  const pub = state.pub;
+  if (state.demoFeed || !pub || !pub.isOpen()) return;
+  try {
+    await pub.request({ forget_all: "proposal" }, 10000);
+  } catch {
+    /* continue */
+  }
+  if (gen !== state.payoutGen) return;
+  state.payoutReqs.clear();
+  const s = state.settings;
+  const currency = state.account ? state.account.currency : "USD";
+  for (let d = 0; d <= 9; d++) {
+    if (gen !== state.payoutGen || !pub.isOpen()) return;
     try {
-      await request({ forget_all: "proposal" }, 10000);
-      const res = await request({
+      const res = await pub.request({
         proposal: 1,
         amount: s.stake,
         basis: "stake",
         contract_type: s.type === "matches" ? "DIGITMATCH" : "DIGITDIFF",
-        currency: state.account ? state.account.currency : "USD",
+        currency,
         duration: 1,
         duration_unit: "t",
         underlying_symbol: s.symbol,
-        barrier: String(s.digit),
-        subscribe: 1, // keep the payout live as the market moves
+        barrier: String(d),
+        subscribe: 1,
       });
-      state.payoutReqId = res.req_id;
-      onProposal(res.proposal);
-    } catch {
-      state.payout = { multiplier: FALLBACK_PAYOUTS[s.type], source: "estimate" };
-      renderPayout();
+      if (gen !== state.payoutGen) return;
+      state.payoutReqs.set(res.req_id, d);
+      if (res.proposal) applyDigitProposal(res.req_id, res.proposal);
+    } catch (err) {
+      const code = err && err.code ? err.code : "";
+      if (code.indexOf("RateLimit") === 0) return;
     }
-  }, 400);
+  }
 }
 
-/** Proposal payout/ask may arrive as strings — normalize defensively. */
-function onProposal(proposal) {
+/** Proposal payout/ask may be numbers or strings — normalize defensively. */
+function applyDigitProposal(reqId, proposal) {
+  const d = state.payoutReqs.get(reqId);
+  if (d == null) return;
   const payout = Number(proposal.payout);
   const ask = Number(proposal.ask_price) || state.settings.stake;
-  if (Number.isFinite(payout) && payout > 0 && ask > 0) {
-    state.payout = { multiplier: payout / ask, source: "live" };
-  } else {
-    state.payout = { multiplier: FALLBACK_PAYOUTS[state.settings.type], source: "estimate" };
+  if (Number.isFinite(payout) && payout > 0 && ask > 0) state.digitPayouts[d] = payout / ask;
+  renderDigitPayouts();
+  if (d === state.settings.digit) renderPayout();
+}
+
+/* ------------------------------ REST helpers ----------------------------- */
+
+function errText(err) {
+  if (!err) return "unknown error";
+  if (typeof err === "string") return err;
+  return err.message || err.code || "unknown error";
+}
+
+async function derivRest(method, path) {
+  const cred = state.cred;
+  if (!cred) throw new Error("Not connected");
+  const headers = { Authorization: "Bearer " + cred.token };
+  if (cred.kind === "pat") {
+    const appId = getAppId();
+    if (!appId) throw new Error("Add your App ID (developers.deriv.com → Apps) to use an API token.");
+    headers["Deriv-App-ID"] = appId;
   }
-  renderPayout();
+  if (method !== "GET") headers["Content-Type"] = "application/json";
+  let res;
+  try {
+    res = await fetch(state.cfg.api_base + path, { method, headers, body: method === "GET" ? undefined : "{}" });
+  } catch {
+    throw new Error("Could not reach Deriv's API from this network.");
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    /* non-JSON */
+  }
+  if (!res.ok) {
+    const e = new Error(
+      (data && (data.message || (data.error && data.error.message) || (data.errors && data.errors[0] && data.errors[0].message))) ||
+        "Deriv returned HTTP " + res.status
+    );
+    e.status = res.status;
+    throw e;
+  }
+  return data;
+}
+
+/* ------------------------------ sign-in flow ----------------------------- */
+
+function b64url(bytes) {
+  let s = "";
+  const arr = new Uint8Array(bytes);
+  for (let i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function redirectUri() {
+  return location.origin + "/api/deriv/callback";
+}
+
+async function startOAuth() {
+  if (!oauthAvailable()) {
+    toast("Login with Deriv needs the hosted app + your App ID. Use an API token instead.", "error");
+    return;
+  }
+  if (!window.crypto || !crypto.subtle) {
+    toast("This browser can't do secure login (needs HTTPS).", "error");
+    return;
+  }
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  const st = b64url(crypto.getRandomValues(new Uint8Array(16)));
+  ssSet(PKCE_KEY, { verifier, state: st });
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: getAppId(),
+    redirect_uri: redirectUri(),
+    scope: "trade",
+    state: st,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+  });
+  window.location.href = state.cfg.oauth_authorize_url + "?" + params.toString();
+}
+
+/**
+ * Handles the return from auth.deriv.com. The backend callback moved
+ * ?code&state into the #fragment; we verify state, swap the code for a
+ * token via the backend, and wipe the URL.
+ */
+async function handleOAuthReturn() {
+  if (!location.hash || location.hash.length < 2) return false;
+  const params = new URLSearchParams(location.hash.slice(1));
+  const code = params.get("code");
+  const error = params.get("error");
+  if (!code && !error) return false;
+  history.replaceState(null, "", location.pathname + location.search);
+
+  if (error) {
+    toast("Deriv login cancelled: " + (params.get("error_description") || error), "error");
+    return true;
+  }
+  const pkce = ssGet(PKCE_KEY);
+  ssSet(PKCE_KEY, null);
+  if (!pkce || pkce.state !== params.get("state")) {
+    toast("Login check failed (state mismatch) — please try again.", "error");
+    return true;
+  }
+  try {
+    const res = await fetch("/api/deriv/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, code_verifier: pkce.verifier, redirect_uri: redirectUri() }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.access_token) {
+      throw new Error((data && data.detail) || "token exchange failed");
+    }
+    setCred({ token: data.access_token, kind: "oauth", expiresAt: Date.now() + (Number(data.expires_in) || 3600) * 1000 });
+    toast("Signed in with Deriv — loading your accounts…", "success");
+    await connectAccounts();
+  } catch (err) {
+    toast("Deriv login failed: " + errText(err), "error");
+  }
+  return true;
+}
+
+function setCred(cred) {
+  state.cred = cred;
+  ssSet(CRED_KEY, cred);
+}
+
+function loadCred() {
+  const c = ssGet(CRED_KEY);
+  if (c && c.token && (!c.expiresAt || c.expiresAt > Date.now())) state.cred = c;
+  else ssSet(CRED_KEY, null);
+  const a = ssGet(ACTIVE_KEY);
+  if (typeof a === "string") state.activeId = a;
+}
+
+/** Lists the user's Options accounts and opens the trading socket for the chosen one. */
+async function connectAccounts() {
+  if (!state.cred || state.connecting) return false;
+  state.connecting = true;
+  setConnectBusy(true);
+  try {
+    const data = await derivRest("GET", "/trading/v1/options/accounts");
+    const list = (data && Array.isArray(data.data) ? data.data : [])
+      .filter((a) => a && a.account_id && a.status !== "inactive")
+      .map((a) => ({
+        id: String(a.account_id),
+        currency: a.currency || "USD",
+        balance: Number(a.balance) || 0,
+        isVirtual: a.account_type === "demo",
+      }));
+    if (!list.length) throw new Error("No active Options trading accounts found on this login.");
+    state.accounts = list;
+    const preferred =
+      list.find((a) => a.id === state.activeId) || list.find((a) => a.isVirtual) || list[0];
+    await openTradeSocket(preferred);
+    closeConnectDialog();
+    return true;
+  } catch (err) {
+    if (err && (err.status === 401 || err.status === 403)) {
+      clearCred();
+      showConnectError(
+        err.status === 403
+          ? "That token lacks the Trade scope — create one with Trade access."
+          : "Deriv rejected the token (expired or invalid). Please connect again."
+      );
+      openConnectDialog();
+    } else {
+      showConnectError(errText(err));
+      openConnectDialog();
+    }
+    renderAccount();
+    return false;
+  } finally {
+    state.connecting = false;
+    setConnectBusy(false);
+  }
+}
+
+/** Gets a one-time WebSocket URL for `acc` and opens the trading socket on it. */
+async function openTradeSocket(acc) {
+  if (state.trade) state.trade.close();
+  state.account = null;
+  state.activeId = acc.id;
+  ssSet(ACTIVE_KEY, acc.id);
+  renderAccount();
+
+  const otp = await derivRest("POST", "/trading/v1/options/accounts/" + encodeURIComponent(acc.id) + "/otp");
+  const url = otp && otp.data && otp.data.url;
+  if (!url) throw new Error("Deriv did not return a trading connection URL.");
+
+  await new Promise((resolve, reject) => {
+    let settled = false;
+    const sock = makeSocket("trade", {
+      onOpen: () => {
+        settled = true;
+        state.tradeRetryDelay = 1000;
+        state.account = { ...acc };
+        renderAccount();
+        renderModeUI();
+        sock.request({ balance: 1, subscribe: 1 }).catch(() => {});
+        toast("Connected to " + acc.id + " (" + (acc.isVirtual ? "Demo" : "Real") + ")", "success");
+        keepPayoutsFresh(); // re-quote in the account currency
+        resolve();
+      },
+      onMessage: onTradeMessage,
+      onClose: () => {
+        if (!settled) {
+          settled = true;
+          reject(new Error("Trading connection was refused by Deriv."));
+          return;
+        }
+        onTradeSocketLost(acc);
+      },
+    });
+    state.trade = sock;
+    sock.open(url);
+  });
+}
+
+function onTradeSocketLost(acc) {
+  state.account = null;
+  renderAccount();
+  if (state.running && state.tradeMode === "live") {
+    state.running = false;
+    renderControls();
+    toast("Trading connection lost — live trading stopped.", "error");
+  }
+  if (!state.cred || state.activeId !== acc.id) return;
+  // OTPs are single-use: reconnect with a fresh one after a backoff.
+  setTimeout(() => {
+    if (!state.cred || state.activeId !== acc.id || (state.trade && state.trade.isBusy())) return;
+    openTradeSocket(acc).catch(() => onTradeSocketLost(acc));
+  }, state.tradeRetryDelay + Math.random() * 500);
+  state.tradeRetryDelay = Math.min(state.tradeRetryDelay * 2, 30000);
+}
+
+function onTradeMessage(msg) {
+  if (msg.error) return; // request() callers surface their own errors
+  if (msg.msg_type === "balance" && msg.balance) onBalance(msg.balance);
+  else if (msg.msg_type === "proposal_open_contract" && msg.proposal_open_contract) {
+    onProposalOpenContract(msg.proposal_open_contract);
+  }
+}
+
+function onBalance(b) {
+  if (!state.account) return;
+  const v = Number(b.balance);
+  if (Number.isFinite(v)) state.account.balance = v;
+  if (b.currency) state.account.currency = b.currency;
+  const listed = state.accounts.find((a) => a.id === state.account.id);
+  if (listed) listed.balance = state.account.balance;
+  renderAccount();
+}
+
+async function connectWithToken() {
+  const token = $("token-input").value.trim();
+  if (!token) {
+    showConnectError("Paste your API token first.");
+    return;
+  }
+  const appInput = $("app-id-input").value.trim();
+  if (appInput) saveAppId(appInput);
+  if (!getAppId()) {
+    showConnectError("API tokens also need your App ID — paste it above (developers.deriv.com → Apps).");
+    return;
+  }
+  showConnectError("");
+  setCred({ token, kind: "pat", expiresAt: null });
+  const ok = await connectAccounts();
+  if (ok) $("token-input").value = "";
+}
+
+function switchAccount(id) {
+  const acc = state.accounts.find((a) => a.id === id);
+  if (!acc || id === state.activeId) return;
+  // Switching always drops back to Simulate; Live (and real-money arming)
+  // must be chosen again deliberately on the new account.
+  state.running = false;
+  state.tradeMode = "sim";
+  state.realArmed = false;
+  renderModeUI();
+  openTradeSocket(acc).catch((err) => toast("Could not switch: " + errText(err), "error"));
+}
+
+function clearCred() {
+  state.cred = null;
+  ssSet(CRED_KEY, null);
+  ssSet(ACTIVE_KEY, null);
+  if (state.trade) state.trade.close();
+  state.trade = null;
+  state.account = null;
+  state.accounts = [];
+  state.activeId = null;
+  state.realArmed = false;
+  if (state.tradeMode === "live") {
+    state.tradeMode = "sim";
+    state.running = false;
+  }
+}
+
+function disconnect() {
+  clearCred();
+  renderAccount();
+  renderModeUI();
+  toast("Disconnected — tokens cleared from this browser.", "info");
 }
 
 /* ------------------------------ market stream ---------------------------- */
 
 function onTick(tick) {
-  const pip = Number.isFinite(tick.pip_size) ? tick.pip_size : 2;
+  const pip = Number.isFinite(Number(tick.pip_size)) ? Number(tick.pip_size) : 2;
   const quoteStr = Number(tick.quote).toFixed(pip);
   const digit = Number(quoteStr.charAt(quoteStr.length - 1));
 
@@ -632,48 +831,182 @@ function onTick(tick) {
   renderTrail();
   renderFreq();
 
-  if (state.running) settleTrade({ digit, symbol: tick.symbol });
+  if (!state.running) return;
+  if (tick.symbol && tick.symbol !== state.settings.symbol) return;
+  if (!passesEntryFilter()) return;
+  if (state.tradeMode === "live") placeLiveTrade();
+  else settleSimTrade(digit);
+}
+
+/**
+ * Smart entry — a pacing filter, NOT an edge (ticks are independent, so the
+ * odds per trade don't change; it just trades less often).
+ *   Differs: skip the tick right after your digit hit.
+ *   Matches: only enter after your digit has been absent for 3 ticks.
+ */
+function passesEntryFilter() {
+  if (!state.settings.smartEntry) return true;
+  const s = state.settings;
+  const prev = (i) => state.trail[i + 1];
+  if (s.type === "matches") {
+    for (let i = 0; i < 3; i++) {
+      const t = prev(i);
+      if (t && t.digit === s.digit) return false;
+    }
+    return true;
+  }
+  const p = prev(0);
+  return !(p && p.digit === s.digit);
 }
 
 /* ----------------------------- simulation core --------------------------- */
 
-/** One simulated trade per tick — scored on the REAL last digit. */
-function settleTrade(entry) {
+function settleSimTrade(resultDigit) {
   const s = state.settings;
-  if (entry.symbol !== s.symbol) return; // stale tick from a previous market
+  const win = s.type === "matches" ? resultDigit === s.digit : resultDigit !== s.digit;
+  const m = state.payout.multiplier;
+  const pnl = win ? Math.round(s.stake * (m - 1) * 100) / 100 : -s.stake;
+  settleShared({ win, stake: s.stake, pnl, mult: win ? m : 0, resultDigit, type: s.type, digit: s.digit, symbol: s.symbol, live: false });
+}
 
-  const win = s.type === "matches" ? entry.digit === s.digit : entry.digit !== s.digit;
-  const stake = s.stake;
-  const pnl = win
-    ? Math.round(stake * (state.payout.multiplier - 1) * 100) / 100
-    : -stake;
+/* ------------------------------ live trading ----------------------------- */
 
+function liveArmed() {
+  return (
+    state.tradeMode === "live" &&
+    state.running &&
+    !!state.account &&
+    !!state.trade &&
+    state.trade.isOpen() &&
+    (state.account.isVirtual || state.realArmed)
+  );
+}
+
+/**
+ * Buys a REAL 1-tick contract on the active account via "buy with
+ * parameters". Settlement arrives through proposal_open_contract.
+ */
+async function placeLiveTrade() {
+  if (!liveArmed()) return;
+  if (state.inflightBuys + state.openContracts.size >= MAX_OPEN_CONTRACTS) return;
+  const s = state.settings;
+  const acc = state.account;
+  state.inflightBuys += 1;
+  try {
+    const res = await state.trade.request({
+      buy: "1",
+      price: s.stake,
+      parameters: {
+        amount: s.stake,
+        basis: "stake",
+        contract_type: s.type === "matches" ? "DIGITMATCH" : "DIGITDIFF",
+        currency: acc.currency,
+        duration: 1,
+        duration_unit: "t",
+        underlying_symbol: s.symbol,
+        barrier: String(s.digit),
+      },
+    });
+    const b = res.buy || {};
+    if (b.contract_id == null) return;
+    state.openContracts.set(String(b.contract_id), {
+      digit: s.digit,
+      type: s.type,
+      stake: Number(b.buy_price) || s.stake,
+      symbol: s.symbol,
+    });
+    if (b.balance_after != null) onBalance({ balance: b.balance_after });
+    state.trade
+      .request({ proposal_open_contract: 1, contract_id: b.contract_id, subscribe: 1 }, 60000)
+      .then((r) => r && r.proposal_open_contract && onProposalOpenContract(r.proposal_open_contract))
+      .catch(() => {});
+  } catch (err) {
+    toast("Trade rejected: " + errText(err), "error");
+    const code = err && err.code ? err.code : "";
+    if (code === "InsufficientBalance" || code === "AuthorizationRequired" || code === "PermissionDenied") {
+      state.running = false;
+      renderControls();
+    }
+  } finally {
+    state.inflightBuys -= 1;
+  }
+}
+
+function lastDigitOf(v) {
+  if (v == null) return null;
+  const s = String(v);
+  const c = s.charAt(s.length - 1);
+  return c >= "0" && c <= "9" ? Number(c) : null;
+}
+
+function onProposalOpenContract(poc) {
+  if (!poc || poc.contract_id == null) return;
+  const key = String(poc.contract_id);
+  const meta = state.openContracts.get(key);
+  if (!meta || !poc.is_sold) return;
+  state.openContracts.delete(key);
+  if (poc.subscription && poc.subscription.id && state.trade) {
+    state.trade.request({ forget: poc.subscription.id }).catch(() => {});
+  }
+  const stake = Number(poc.buy_price) || meta.stake;
+  const payout = Number(poc.payout);
+  const profit = Number(poc.profit);
+  const pnl = Number.isFinite(profit) ? profit : (Number(poc.sell_price) || 0) - stake;
+  const win = pnl > 0;
+  const resultDigit =
+    lastDigitOf(poc.exit_tick_display_value) ??
+    lastDigitOf(poc.exit_spot_display_value) ??
+    lastDigitOf(poc.exit_tick_display) ??
+    null;
+  settleShared({
+    win,
+    stake,
+    pnl: Math.round(pnl * 100) / 100,
+    mult: win && Number.isFinite(payout) && stake > 0 ? payout / stake : 0,
+    resultDigit,
+    type: meta.type,
+    digit: meta.digit,
+    symbol: poc.underlying_symbol || meta.symbol,
+    live: true,
+  });
+}
+
+/* --------------------------- shared settlement --------------------------- */
+
+function settleShared(t) {
   const st = state.stats;
   st.trades += 1;
-  if (win) {
+  if (t.win) {
     st.wins += 1;
     st.streak = st.streak >= 0 ? st.streak + 1 : 1;
   } else {
     st.losses += 1;
     st.streak = st.streak <= 0 ? st.streak - 1 : -1;
   }
-  st.net = Math.round((st.net + pnl) * 100) / 100;
+  st.net = Math.round((st.net + t.pnl) * 100) / 100;
 
-  state.history.unshift({
-    time: new Date(),
-    symbol: s.symbol,
-    type: s.type,
-    digit: s.digit,
-    resultDigit: entry.digit,
-    stake,
-    win,
-    pnl,
-  });
+  state.history.unshift({ ...t, time: new Date() });
   if (state.history.length > HISTORY_LIMIT) state.history.pop();
 
   renderStats();
   renderHistory();
-  announceResult(win, pnl);
+  $("result-announcer").textContent = (t.win ? "Win " : "Loss ") + fmtSigned(t.pnl);
+  showResultFlash(t.win, t.mult, t.pnl);
+  checkRiskLimits();
+}
+
+function checkRiskLimits() {
+  const net = state.stats.net;
+  const { tp, sl } = state.settings;
+  if (tp != null && net >= tp) {
+    state.running = false;
+    renderControls();
+    toast("Take profit reached (" + fmtSigned(net) + ") — stopped.", "success");
+  } else if (sl != null && net <= -sl) {
+    state.running = false;
+    renderControls();
+    toast("Stop loss reached (" + fmtSigned(net) + ") — stopped.", "error");
+  }
 }
 
 /* -------------------------------- formatting ----------------------------- */
@@ -683,12 +1016,10 @@ const fmtCache = {};
 function money(value, currency) {
   const cur = currency || (state.account ? state.account.currency : "USD");
   try {
-    if (!fmtCache[cur]) {
-      fmtCache[cur] = new Intl.NumberFormat("en-US", { style: "currency", currency: cur });
-    }
+    if (!fmtCache[cur]) fmtCache[cur] = new Intl.NumberFormat("en-US", { style: "currency", currency: cur });
     return fmtCache[cur].format(value);
   } catch {
-    return value.toFixed(2) + " " + cur;
+    return Number(value).toFixed(2) + " " + cur;
   }
 }
 
@@ -708,42 +1039,85 @@ function symbolName(code) {
 /* -------------------------------- rendering ------------------------------ */
 
 function renderAll() {
-  renderStatus();
+  setStatus(state.status);
   renderAccount();
+  renderModeUI();
   renderStrategy();
-  renderControls();
   renderQuote(null);
   renderTrail();
   renderFreq();
   renderPayout();
+  renderDigitPayouts();
   renderStats();
   renderHistory();
 }
 
-function renderStatus() {
-  setStatus(state.status);
-}
-
 function renderAccount() {
-  const empty = $("account-empty");
-  const live = $("account-live");
-  const navBtn = $("connect-button-nav");
   const acc = state.account;
+  const sel = $("account-select");
+  const navBtn = $("connect-button-nav");
 
   if (acc) {
-    empty.hidden = true;
-    live.hidden = false;
+    $("account-empty").hidden = true;
+    $("account-live").hidden = false;
     $("balance-value").textContent = money(acc.balance, acc.currency);
     $("balance-currency").textContent = acc.currency;
-    $("account-loginid").textContent = acc.loginid + (acc.isVirtual ? " · demo" : " · real");
+    $("account-loginid").textContent = acc.id;
     const badge = $("account-type");
     badge.textContent = acc.isVirtual ? "Demo" : "Real";
     badge.className = "badge " + (acc.isVirtual ? "badge-demo" : "badge-real");
-    navBtn.textContent = acc.loginid;
+    navBtn.textContent = acc.id;
   } else {
-    empty.hidden = false;
-    live.hidden = true;
-    navBtn.textContent = "Connect";
+    $("account-empty").hidden = false;
+    $("account-live").hidden = true;
+    navBtn.textContent = state.cred ? "Connecting…" : "Connect";
+  }
+
+  if (acc && state.accounts.length > 1) {
+    sel.hidden = false;
+    sel.textContent = "";
+    for (const a of state.accounts) {
+      const opt = document.createElement("option");
+      opt.value = a.id;
+      opt.textContent = a.id + " · " + (a.isVirtual ? "Demo" : "Real") + " · " + money(a.balance, a.currency);
+      sel.appendChild(opt);
+    }
+    sel.value = acc.id;
+  } else {
+    sel.hidden = true;
+  }
+}
+
+function renderModeUI() {
+  const acc = state.account;
+  const isLive = state.tradeMode === "live";
+  const isReal = isLive && acc && !acc.isVirtual;
+  const badge = $("mode-badge");
+
+  $("trade-mode-sim").setAttribute("aria-pressed", String(!isLive));
+  $("trade-mode-live").setAttribute("aria-pressed", String(isLive));
+
+  if (isLive) {
+    badge.textContent = isReal ? "Live · Real money" : "Live · Demo";
+    badge.className = "badge " + (isReal ? "badge-live-red" : "badge-live-blue");
+    $("shield-text").textContent = isReal ? "REAL MONEY · " + acc.id : "Live trading · DEMO account";
+  } else {
+    badge.textContent = "Simulation";
+    badge.className = "badge badge-sim";
+    $("shield-text").textContent = "Simulate mode — no real trades";
+  }
+  renderControls();
+}
+
+function renderControls() {
+  const startBtn = $("start-simulation-btn");
+  startBtn.disabled = state.running;
+  $("stop-simulation-btn").disabled = !state.running;
+  $("running-indicator").hidden = !state.running;
+  if (state.tradeMode === "live") {
+    startBtn.textContent = state.account && !state.account.isVirtual ? "Start LIVE trading" : "Start live (demo)";
+  } else {
+    startBtn.textContent = "Start simulation";
   }
 }
 
@@ -751,13 +1125,12 @@ function renderQuote(entry) {
   const main = $("quote-main");
   const digitEl = $("quote-digit");
   const meta = $("quote-meta");
-
   if (!entry) {
     main.textContent = "—";
     digitEl.textContent = "";
     meta.textContent = state.demoFeed
       ? "Synthetic demo feed — Deriv unreachable"
-      : wsOpen()
+      : state.pub && state.pub.isOpen()
         ? "Waiting for the first tick…"
         : "Connecting to Deriv…";
     return;
@@ -765,12 +1138,9 @@ function renderQuote(entry) {
   main.textContent = entry.quoteStr.slice(0, -1);
   digitEl.textContent = entry.digit;
   meta.textContent =
-    symbolName(state.settings.symbol) +
-    " · " + fmtClock(new Date(entry.epoch * 1000)) +
-    (state.demoFeed ? " · synthetic demo feed" : "");
-
+    symbolName(state.settings.symbol) + " · " + fmtClock(new Date(entry.epoch * 1000)) + (state.demoFeed ? " · synthetic demo feed" : " · live");
   digitEl.classList.remove("flash");
-  void digitEl.offsetWidth; // restart the animation
+  void digitEl.offsetWidth;
   digitEl.classList.add("flash");
 }
 
@@ -797,27 +1167,22 @@ function renderFreq() {
   const wrap = $("digit-frequency");
   wrap.textContent = "";
   const max = Math.max(1, ...state.freq);
+  const total = state.freqQueue.length;
   for (let d = 0; d <= 9; d++) {
     const col = document.createElement("div");
     col.className = "freq-col" + (d === state.settings.digit ? " selected" : "");
-
     const track = document.createElement("div");
     track.className = "freq-track";
     const bar = document.createElement("div");
     bar.className = "freq-bar";
-    const count = state.freq[d];
-    bar.style.height = (count / max) * 100 + "%";
+    bar.style.height = (state.freq[d] / max) * 100 + "%";
     track.appendChild(bar);
-
     const label = document.createElement("span");
     label.className = "freq-label";
     label.textContent = String(d);
-
-    const pct = state.freqQueue.length ? Math.round((count / state.freqQueue.length) * 100) : 0;
-    col.title = d + " appeared in " + count + " of the last " + state.freqQueue.length + " ticks (" + pct + "%)";
-
-    col.appendChild(track);
-    col.appendChild(label);
+    const pct = total ? Math.round((state.freq[d] / total) * 100) : 0;
+    col.title = d + ": " + state.freq[d] + " of the last " + total + " ticks (" + pct + "%)";
+    col.append(track, label);
     wrap.appendChild(col);
   }
 }
@@ -827,32 +1192,38 @@ function renderStrategy() {
   $("trade-type-matches").setAttribute("aria-pressed", String(isMatches));
   $("trade-type-differs").setAttribute("aria-pressed", String(!isMatches));
   $("trade-type-description").textContent = isMatches
-    ? "Wins when the last digit EQUALS your digit. Rare (~10%) but pays roughly 8–9×."
-    : "Wins when the last digit is ANYTHING BUT your digit. Frequent (~90%) but pays roughly 1.1×.";
-
+    ? "Wins when the last digit EQUALS your digit. Rare (~10%) but pays about 8–9×."
+    : "Wins when the last digit is ANYTHING BUT your digit. Frequent (~90%) but pays about 1.1×.";
   for (const btn of document.querySelectorAll(".digit")) {
-    const selected = Number(btn.dataset.digit) === state.settings.digit;
-    btn.setAttribute("aria-pressed", String(selected));
+    btn.setAttribute("aria-pressed", String(Number(btn.dataset.digit) === state.settings.digit));
   }
-
   const stakeInput = $("stake-input");
   if (document.activeElement !== stakeInput) stakeInput.value = state.settings.stake.toFixed(2);
+  const tpInput = $("take-profit-input");
+  if (document.activeElement !== tpInput) tpInput.value = state.settings.tp != null ? state.settings.tp : "";
+  const slInput = $("stop-loss-input");
+  if (document.activeElement !== slInput) slInput.value = state.settings.sl != null ? state.settings.sl : "";
+  $("smart-entry-toggle").checked = !!state.settings.smartEntry;
 }
 
 function renderPayout() {
   const s = state.settings;
-  const m = state.payout.multiplier;
-  $("payout-mult").textContent = (state.payout.source === "live" ? "" : "≈") + m.toFixed(2) + "×";
-  const winReturn = Math.round(s.stake * m * 100) / 100;
+  const liveV = state.digitPayouts[s.digit];
+  const m = liveV != null ? liveV : FALLBACK_PAYOUTS[s.type];
+  state.payout = { multiplier: m, source: liveV != null ? "live" : "estimate" };
+  $("payout-mult").textContent = (liveV != null ? "" : "≈") + m.toFixed(2) + "×";
   $("payout-detail").textContent =
-    (state.payout.source === "live" ? "Live quote" : "Estimate") +
-    " — win returns " + money(winReturn) + " · risk " + money(s.stake) + " per simulated trade";
+    (liveV != null ? "Live quote" : "Estimate") + " — win returns " + money(Math.round(s.stake * m * 100) / 100) + " · risk " + money(s.stake);
 }
 
-function renderControls() {
-  $("start-simulation-btn").disabled = state.running;
-  $("stop-simulation-btn").disabled = !state.running;
-  $("running-indicator").hidden = !state.running;
+function renderDigitPayouts() {
+  for (let d = 0; d <= 9; d++) {
+    const el = document.querySelector('[data-digit-pay="' + d + '"]');
+    if (!el) continue;
+    const v = state.digitPayouts[d];
+    el.textContent = (v != null ? "" : "≈") + (v != null ? v : FALLBACK_PAYOUTS[state.settings.type]).toFixed(2) + "×";
+    el.classList.toggle("live", v != null);
+  }
 }
 
 function renderStats() {
@@ -860,12 +1231,10 @@ function renderStats() {
   $("stat-wins").textContent = String(st.wins);
   $("stat-losses").textContent = String(st.losses);
   $("stat-win-rate").textContent = st.trades ? Math.round((st.wins / st.trades) * 100) + "%" : "—";
-
   const pnlEl = $("stat-pnl");
   pnlEl.textContent = st.net === 0 ? money(0) : fmtSigned(st.net);
   pnlEl.classList.toggle("win", st.net > 0);
   pnlEl.classList.toggle("loss", st.net < 0);
-
   $("stat-trades").textContent = st.trades + (st.trades === 1 ? " trade" : " trades");
   $("stat-streak").textContent =
     st.streak > 0 ? "streak W" + st.streak : st.streak < 0 ? "streak L" + Math.abs(st.streak) : "streak —";
@@ -873,84 +1242,108 @@ function renderStats() {
 
 function renderHistory() {
   const body = $("trade-history-body");
-  const emptyMsg = $("trade-history-empty");
   body.textContent = "";
-
-  emptyMsg.hidden = state.history.length > 0;
-
+  $("trade-history-empty").hidden = state.history.length > 0;
   for (const t of state.history) {
     const tr = document.createElement("tr");
-
-    const tdTime = document.createElement("td");
-    tdTime.textContent = fmtClock(t.time);
-
-    const tdMarket = document.createElement("td");
-    tdMarket.textContent = t.symbol;
-
-    const tdContract = document.createElement("td");
-    tdContract.textContent = (t.type === "matches" ? "Matches " : "Differs ") + t.digit;
-
-    const tdDigits = document.createElement("td");
-    tdDigits.textContent = t.digit + " → " + t.resultDigit;
-
-    const tdStake = document.createElement("td");
-    tdStake.textContent = money(t.stake);
-
+    const cells = [
+      fmtClock(t.time),
+      t.live ? "Live" : "Sim",
+      t.symbol,
+      (t.type === "matches" ? "Matches " : "Differs ") + t.digit,
+      t.digit + " → " + (t.resultDigit == null ? "?" : t.resultDigit),
+      money(t.stake),
+    ];
+    for (const c of cells) {
+      const td = document.createElement("td");
+      td.textContent = c;
+      tr.appendChild(td);
+    }
     const tdPnl = document.createElement("td");
     tdPnl.textContent = fmtSigned(t.pnl);
     tdPnl.className = t.pnl >= 0 ? "pl-pos" : "pl-neg";
-
-    const tdResult = document.createElement("td");
+    const tdRes = document.createElement("td");
     const badge = document.createElement("span");
     badge.className = "badge " + (t.win ? "badge-win" : "badge-loss");
     badge.textContent = t.win ? "Win" : "Loss";
-    tdResult.appendChild(badge);
-
-    tr.append(tdTime, tdMarket, tdContract, tdDigits, tdStake, tdPnl, tdResult);
+    tdRes.appendChild(badge);
+    tr.append(tdPnl, tdRes);
     body.appendChild(tr);
   }
 }
 
-function announceResult(win, pnl) {
-  $("result-announcer").textContent = (win ? "Win " : "Loss ") + fmtSigned(pnl);
-  const tile = $("stat-pnl").parentElement;
-  tile.classList.remove("win-burst", "loss-pulse");
-  void tile.offsetWidth;
-  tile.classList.add(win ? "win-burst" : "loss-pulse");
+let flashTimer = null;
+
+/** Big multiplier burst over the digit matrix on every settled trade. */
+function showResultFlash(win, mult, pnl) {
+  const el = $("result-flash");
+  el.className = "result-flash " + (win ? "win" : "loss") + (win && mult >= 5 ? " big" : "");
+  el.textContent = "";
+  const m = document.createElement("span");
+  m.className = "rf-mult";
+  m.textContent = "×" + (Number(mult) > 0 ? Number(mult).toFixed(2) : "0.00");
+  const txt = document.createElement("span");
+  txt.className = "rf-txt";
+  txt.textContent = (win ? "WIN " : "LOSS ") + fmtSigned(pnl);
+  el.append(m, txt);
+  el.hidden = false;
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => {
+    el.hidden = true;
+  }, 1400);
 }
 
-/* ----------------------------- connect dialog ---------------------------- */
+/* ----------------------------- dialogs + toasts -------------------------- */
 
-function openConnectDialog(prefillError) {
+function openConnectDialog() {
+  $("oauth-block").hidden = !oauthAvailable();
+  const appInput = $("app-id-input");
+  if (document.activeElement !== appInput) appInput.value = getAppId();
   const dialog = $("connect-dialog");
-  showConnectError(prefillError || "");
-  $("oauth-block").hidden = !state.cfg.oauth_ready;
-  $("oauth-setup-note").hidden = state.cfg.oauth_ready;
-  $("token-divider").hidden = false;
-  if (dialog.open) return;
-  dialog.showModal();
-  $("token-input").focus();
+  if (!dialog.open) dialog.showModal();
 }
 
 function closeConnectDialog() {
   const dialog = $("connect-dialog");
   if (dialog.open) dialog.close();
-  $("token-input").value = "";
   showConnectError("");
 }
 
 function showConnectError(message) {
   const el = $("connect-error");
-  if (!message) {
-    el.hidden = true;
-    el.textContent = "";
-  } else {
-    el.hidden = false;
-    el.textContent = message;
-  }
+  el.hidden = !message;
+  el.textContent = message || "";
 }
 
-/* --------------------------------- toasts -------------------------------- */
+function setConnectBusy(busy) {
+  const btn = $("token-connect-button");
+  btn.disabled = busy;
+  btn.textContent = busy ? "Connecting…" : "Connect";
+  renderAccount();
+}
+
+function saveAppId(v) {
+  try {
+    if (v) localStorage.setItem(APPID_KEY, v);
+    else localStorage.removeItem(APPID_KEY);
+  } catch {
+    /* ignore */
+  }
+  $("oauth-block").hidden = !oauthAvailable();
+}
+
+function openArmDialog() {
+  $("arm-loginid").textContent = state.account ? state.account.id : "";
+  $("arm-confirm-checkbox").checked = false;
+  $("arm-enable-button").disabled = true;
+  const dialog = $("arm-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeArmDialog() {
+  const dialog = $("arm-dialog");
+  if (dialog.open) dialog.close();
+}
 
 function toast(message, kind) {
   const container = $("toast-container");
@@ -959,7 +1352,7 @@ function toast(message, kind) {
   el.textContent = message;
   container.appendChild(el);
   while (container.children.length > 3) container.removeChild(container.firstChild);
-  setTimeout(() => el.remove(), 3200);
+  setTimeout(() => el.remove(), 3600);
 }
 
 /* ------------------------------ user actions ----------------------------- */
@@ -972,7 +1365,8 @@ function setTradeType(type) {
   renderTrail();
   renderFreq();
   renderPayout();
-  refreshPayout();
+  renderDigitPayouts();
+  keepPayoutsFresh();
 }
 
 function selectDigit(digit) {
@@ -982,7 +1376,7 @@ function selectDigit(digit) {
   renderStrategy();
   renderTrail();
   renderFreq();
-  refreshPayout();
+  renderPayout();
 }
 
 function setStake(value) {
@@ -990,17 +1384,54 @@ function setStake(value) {
   saveSettings();
   renderStrategy();
   renderPayout();
-  refreshPayout();
+  keepPayoutsFresh();
 }
 
-function startSimulation() {
+function setTradeMode(mode) {
+  if (mode === "live") {
+    if (!state.account) {
+      toast("Connect your Deriv account first — pick Demo to trade virtual funds.", "info");
+      openConnectDialog();
+      return;
+    }
+    if (!state.account.isVirtual && !state.realArmed) {
+      openArmDialog();
+      return;
+    }
+    state.tradeMode = "live";
+    toast(
+      state.account.isVirtual ? "Live trading on DEMO " + state.account.id : "REAL-money trading armed on " + state.account.id,
+      state.account.isVirtual ? "success" : "error"
+    );
+  } else {
+    state.tradeMode = "sim";
+    state.running = false;
+    toast("Simulate mode — nothing is sent to Deriv.", "info");
+  }
+  renderModeUI();
+}
+
+function startRun() {
   if (state.running) return;
+  if (state.tradeMode === "live" && !liveReady()) return;
   state.running = true;
   renderControls();
-  if (!wsOpen()) toast("Waiting for live market data…", "info");
 }
 
-function stopSimulation() {
+function liveReady() {
+  if (!state.account || !state.trade || !state.trade.isOpen()) {
+    toast("Live trading needs your connected account — reconnecting…", "error");
+    openConnectDialog();
+    return false;
+  }
+  if (!state.account.isVirtual && !state.realArmed) {
+    openArmDialog();
+    return false;
+  }
+  return true;
+}
+
+function stopRun() {
   state.running = false;
   renderControls();
 }
@@ -1016,7 +1447,6 @@ function resetSession() {
 /* --------------------------------- events -------------------------------- */
 
 function bindEvents() {
-  // Market selector
   const select = $("symbol-select");
   for (const s of SYMBOLS) {
     const opt = document.createElement("option");
@@ -1029,69 +1459,91 @@ function bindEvents() {
     state.settings.symbol = select.value;
     saveSettings();
     subscribeTicks(select.value);
-    refreshPayout();
-    renderPayout();
+    keepPayoutsFresh();
   });
 
-  // Trade type + digits
+  $("trade-mode-sim").addEventListener("click", () => setTradeMode("sim"));
+  $("trade-mode-live").addEventListener("click", () => setTradeMode("live"));
+  $("account-select").addEventListener("change", (e) => switchAccount(e.target.value));
+
   $("trade-type-matches").addEventListener("click", () => setTradeType("matches"));
   $("trade-type-differs").addEventListener("click", () => setTradeType("differs"));
   for (const btn of document.querySelectorAll(".digit")) {
     btn.addEventListener("click", () => selectDigit(Number(btn.dataset.digit)));
   }
 
-  // Stake
   $("stake-input").addEventListener("change", (e) => setStake(e.target.value));
   for (const chip of document.querySelectorAll(".chip")) {
     chip.addEventListener("click", () => setStake(chip.dataset.stake));
   }
+  $("take-profit-input").addEventListener("change", (e) => {
+    const v = parseFloat(e.target.value);
+    state.settings.tp = Number.isFinite(v) && v > 0 ? v : null;
+    saveSettings();
+  });
+  $("stop-loss-input").addEventListener("change", (e) => {
+    const v = parseFloat(e.target.value);
+    state.settings.sl = Number.isFinite(v) && v > 0 ? v : null;
+    saveSettings();
+  });
+  $("smart-entry-toggle").addEventListener("change", (e) => {
+    state.settings.smartEntry = e.target.checked;
+    saveSettings();
+  });
 
-  // Simulation
-  $("start-simulation-btn").addEventListener("click", startSimulation);
-  $("stop-simulation-btn").addEventListener("click", stopSimulation);
+  $("start-simulation-btn").addEventListener("click", startRun);
+  $("stop-simulation-btn").addEventListener("click", stopRun);
   $("reset-stats-btn").addEventListener("click", resetSession);
 
-  // Connection
-  $("connect-button").addEventListener("click", () => openConnectDialog());
-  $("connect-button-nav").addEventListener("click", () => openConnectDialog());
+  $("connect-button").addEventListener("click", openConnectDialog);
+  $("connect-button-nav").addEventListener("click", openConnectDialog);
   $("oauth-connect-button").addEventListener("click", startOAuth);
+  $("app-id-input").addEventListener("change", (e) => saveAppId(e.target.value.trim()));
   $("token-form").addEventListener("submit", (e) => {
     e.preventDefault();
     connectWithToken();
   });
-  $("connect-cancel-button").addEventListener("click", () => closeConnectDialog());
+  $("connect-cancel-button").addEventListener("click", closeConnectDialog);
   $("disconnect-button").addEventListener("click", disconnect);
   $("connect-dialog").addEventListener("click", (e) => {
-    if (e.target === $("connect-dialog")) closeConnectDialog(); // backdrop click
+    if (e.target === $("connect-dialog")) closeConnectDialog();
   });
 
-  // Keyboard shortcuts: 0–9 pick a digit, ←/→ adjust. Skipped while typing.
+  $("arm-confirm-checkbox").addEventListener("change", (e) => {
+    $("arm-enable-button").disabled = !e.target.checked;
+  });
+  $("arm-enable-button").addEventListener("click", () => {
+    state.realArmed = true;
+    closeArmDialog();
+    setTradeMode("live");
+  });
+  $("arm-cancel-button").addEventListener("click", closeArmDialog);
+  $("arm-dialog").addEventListener("click", (e) => {
+    if (e.target === $("arm-dialog")) closeArmDialog();
+  });
+
   document.addEventListener("keydown", (e) => {
-    if ($("connect-dialog").open) return;
+    if ($("connect-dialog").open || $("arm-dialog").open) return;
     const t = e.target;
     if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return;
-    if (/^[0-9]$/.test(e.key)) {
-      selectDigit(Number(e.key));
-    } else if (e.key === "ArrowRight") {
-      selectDigit((state.settings.digit + 1) % 10);
-    } else if (e.key === "ArrowLeft") {
-      selectDigit((state.settings.digit + 9) % 10);
-    }
+    if (/^[0-9]$/.test(e.key)) selectDigit(Number(e.key));
+    else if (e.key === "ArrowRight") selectDigit((state.settings.digit + 1) % 10);
+    else if (e.key === "ArrowLeft") selectDigit((state.settings.digit + 9) % 10);
   });
 }
 
 /* ---------------------------------- init --------------------------------- */
 
 async function init() {
-  const oauthReturned = parseOAuthReturn();
   loadSettings();
+  loadCred();
   bindEvents();
   renderAll();
   await loadConfig();
-  if (oauthReturned) {
-    toast("Signed in with Deriv — connecting your account…", "info");
-  }
-  connectWs();
+  renderAll();
+  connectPublic();
+  const handled = await handleOAuthReturn();
+  if (!handled && state.cred) connectAccounts();
 }
 
 init();
