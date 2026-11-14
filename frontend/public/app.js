@@ -932,7 +932,6 @@ async function openAccountSocket(acc) {
         state.account = { ...acc };
         renderAccount();
         sock.request({ balance: 1, subscribe: 1 }).catch(() => {});
-        loadAccountTransactions(sock);
         toast("Connected to " + acc.id + " (" + (acc.isVirtual ? "Demo" : "Real") + ")", "success");
         resolve();
       },
@@ -953,33 +952,6 @@ async function openAccountSocket(acc) {
     state.trade = sock;
     sock.open(url);
   });
-}
-
-/** Read-only: the account's own Deriv statement. Never mixed with virtual results. */
-async function loadAccountTransactions(sock) {
-  const list = $("account-tx-list");
-  const note = $("account-tx-note");
-  list.textContent = "";
-  note.textContent = "Loading…";
-  try {
-    const r = await sock.request({ statement: 1, description: 1, limit: 20 }, 15000);
-    const tx = (r.statement && r.statement.transactions) || [];
-    for (const t of tx) {
-      const li = document.createElement("li");
-      const amt = Number(t.amount) || 0;
-      const when = t.transaction_time ? fmtClock(new Date(t.transaction_time * 1000)) : "";
-      li.innerHTML = "<span></span><span></span>";
-      li.firstChild.textContent = when + " · " + (t.action_type || "transaction") + (t.longcode ? " · " + String(t.longcode).slice(0, 60) : "");
-      li.lastChild.textContent = (amt >= 0 ? "+" : "−") + money(Math.abs(amt), state.account && state.account.currency);
-      li.lastChild.className = amt >= 0 ? "pl-pos" : "pl-neg";
-      list.appendChild(li);
-    }
-    note.textContent = tx.length
-      ? "Latest " + tx.length + " entries reported by Deriv for " + state.activeId + "."
-      : "Deriv reports no transactions on " + state.activeId + ". Simulated trades are never sent to Deriv, so they don't appear here.";
-  } catch (err) {
-    note.textContent = "Deriv statement unavailable for this login (" + errText(err) + "). Simulated trades are never sent to Deriv.";
-  }
 }
 
 function onBalance(b) {

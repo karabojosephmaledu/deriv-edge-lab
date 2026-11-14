@@ -50,5 +50,4 @@ OAuth completion, account list/switching, balance, owner nickname.
 ## v6 (final fixes)
 - OAuth root cause: Deriv returns "redirect_uri does not match any pre-registered redirect urls" for every tested URL with the
   configured DERIV_APP_ID. The user must register `<origin>/api/deriv/callback` in developers.deriv.com. The connect dialog shows the exact URL (oauth-redirect-url).
-- Account card: read-only "Verified Deriv transactions" (account-tx-list) via `statement` on the account WS. These are kept separate from the virtual history.
 - History scroll box is fixed at 236px (about 5 rows); the card height doesn't grow.
