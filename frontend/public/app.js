@@ -54,7 +54,7 @@ const DEFAULT_CONFIG = {
 };
 
 /* Used only until live proposal quotes arrive. */
-const FALLBACK_PAYOUTS = { matches: 8.7, differs: 1.09 };
+const FALLBACK_PAYOUTS = { differs: 1.09 };
 
 const HISTORY_LIMIT = 60;
 const TICK_TRAIL = 10;
@@ -67,6 +67,19 @@ const CRED_KEY = "del.cred"; // sessionStorage: { token, kind: "oauth"|"pat", ex
 const ACTIVE_KEY = "del.activeAccount"; // sessionStorage
 const PKCE_KEY = "del.pkce"; // sessionStorage: { verifier, state }
 const APPID_KEY = "del.appid"; // localStorage: optional App ID override
+const DAILY_KEY = "del.daily"; // localStorage: { date, net, hit } — today's LIVE P/L
+
+/* Flags for the common account currencies (inline SVG renders on every OS). */
+const FLAGS = {
+  USD:
+    '<svg viewBox="0 0 30 20" width="30" height="20"><rect width="30" height="20" fill="#B22234"/><g fill="#fff"><rect y="1.54" width="30" height="1.54"/><rect y="4.62" width="30" height="1.54"/><rect y="7.69" width="30" height="1.54"/><rect y="10.77" width="30" height="1.54"/><rect y="13.85" width="30" height="1.54"/><rect y="16.92" width="30" height="1.54"/></g><rect width="12" height="10.77" fill="#3C3B6E"/><g fill="#fff"><circle cx="2" cy="2" r=".6"/><circle cx="6" cy="2" r=".6"/><circle cx="10" cy="2" r=".6"/><circle cx="4" cy="4.5" r=".6"/><circle cx="8" cy="4.5" r=".6"/><circle cx="2" cy="7" r=".6"/><circle cx="6" cy="7" r=".6"/><circle cx="10" cy="7" r=".6"/><circle cx="4" cy="9.3" r=".6"/><circle cx="8" cy="9.3" r=".6"/></g></svg>',
+  EUR:
+    '<svg viewBox="0 0 30 20" width="30" height="20"><rect width="30" height="20" fill="#003399"/><g fill="#FFCC00"><circle cx="15" cy="4" r="1"/><circle cx="19" cy="5.2" r="1"/><circle cx="21" cy="10" r="1"/><circle cx="19" cy="14.8" r="1"/><circle cx="15" cy="16" r="1"/><circle cx="11" cy="14.8" r="1"/><circle cx="9" cy="10" r="1"/><circle cx="11" cy="5.2" r="1"/></g></svg>',
+  GBP:
+    '<svg viewBox="0 0 30 20" width="30" height="20"><rect width="30" height="20" fill="#012169"/><path d="M0 0 30 20M30 0 0 20" stroke="#fff" stroke-width="4"/><path d="M0 0 30 20M30 0 0 20" stroke="#C8102E" stroke-width="1.6"/><path d="M15 0v20M0 10h30" stroke="#fff" stroke-width="6"/><path d="M15 0v20M0 10h30" stroke="#C8102E" stroke-width="3.4"/></svg>',
+  AUD:
+    '<svg viewBox="0 0 30 20" width="30" height="20"><rect width="30" height="20" fill="#012169"/><path d="M0 0 15 10M15 0 0 10" stroke="#fff" stroke-width="2"/><path d="M7.5 0v10M0 5h15" stroke="#fff" stroke-width="3"/><path d="M7.5 0v10M0 5h15" stroke="#C8102E" stroke-width="1.6"/><g fill="#fff"><circle cx="7.5" cy="15" r="1.6"/><circle cx="22.5" cy="5" r="1"/><circle cx="25.5" cy="9" r="1"/><circle cx="20" cy="11" r="1"/><circle cx="22.5" cy="16" r="1"/></g></svg>',
+};
 
 /* --------------------------------- state --------------------------------- */
 
@@ -88,8 +101,12 @@ const state = {
   tradeRetryDelay: 1000,
   tradeMode: "sim", // never persisted — every load starts in Simulate
   realArmed: false, // session-only consent for real-money accounts
-  settings: { symbol: "R_100", type: "differs", digit: 5, stake: 1.0, smartEntry: true, tp: null, sl: null },
+  settings: { symbol: "R_100", type: "differs", digit: 5, stake: 1.0, smartEntry: true, tp: null, sl: null, dailyCap: null, dailyTarget: null, sound: true },
   running: false,
+  paused: false, // true after Pause — session kept, Start reads "Resume"
+  owner: null, // nickname from Deriv (account_manage scope), if granted
+  daily: null,
+  lastPip: 2,
   trail: [],
   freq: new Array(10).fill(0),
   freqQueue: [],
@@ -111,7 +128,6 @@ function loadSettings() {
     if (!raw) return;
     const s = JSON.parse(raw);
     if (SYMBOLS.some((x) => x.code === s.symbol)) state.settings.symbol = s.symbol;
-    if (s.type === "matches" || s.type === "differs") state.settings.type = s.type;
     const d = Number(s.digit);
     if (Number.isInteger(d) && d >= 0 && d <= 9) state.settings.digit = d;
     const st = Number(s.stake);
@@ -121,8 +137,88 @@ function loadSettings() {
     state.settings.tp = Number.isFinite(tp) && tp > 0 ? tp : null;
     const sl = Number(s.sl);
     state.settings.sl = Number.isFinite(sl) && sl > 0 ? sl : null;
+    const dc = Number(s.dailyCap);
+    state.settings.dailyCap = Number.isFinite(dc) && dc > 0 ? dc : null;
+    const dt = Number(s.dailyTarget);
+    state.settings.dailyTarget = Number.isFinite(dt) && dt > 0 ? dt : null;
+    state.settings.sound = s.sound !== false;
   } catch {
     /* corrupted settings are ignored — defaults stand */
+  }
+}
+
+/* ------------------------- daily live P/L ledger ------------------------- */
+
+function todayKey() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+/** Today's LIVE net P/L, persisted per local calendar day; resets automatically at midnight. */
+function getDaily() {
+  if (!state.daily || state.daily.date !== todayKey()) {
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(DAILY_KEY) || "null");
+    } catch {
+      /* ignore */
+    }
+    state.daily = saved && saved.date === todayKey() ? saved : { date: todayKey(), net: 0, hit: null };
+  }
+  return state.daily;
+}
+
+function saveDaily() {
+  try {
+    localStorage.setItem(DAILY_KEY, JSON.stringify(state.daily));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Returns "loss" | "target" | null — whether live trading is locked for today. */
+function dailyLock() {
+  const d = getDaily();
+  const { dailyCap, dailyTarget } = state.settings;
+  if (dailyCap != null && d.net <= -dailyCap) return "loss";
+  if (dailyTarget != null && d.net >= dailyTarget) return "target";
+  return null;
+}
+
+/* ------------------------------ sound alerts ----------------------------- */
+
+let audioCtx = null;
+
+function unlockAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  } catch {
+    audioCtx = null;
+  }
+}
+
+/** Short synthesized chime: rising two-note for a win, low buzz for a loss. */
+function playResultSound(win) {
+  if (!state.settings.sound || !audioCtx) return;
+  try {
+    const now = audioCtx.currentTime;
+    const notes = win ? [880, 1318.5] : [220, 164.8];
+    notes.forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = win ? "sine" : "square";
+      osc.frequency.value = freq;
+      const t0 = now + i * 0.09;
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(win ? 0.18 : 0.08, t0 + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.18);
+    });
+  } catch {
+    /* audio unavailable — silent */
   }
 }
 
@@ -475,7 +571,7 @@ async function subscribePayouts() {
         proposal: 1,
         amount: s.stake,
         basis: "stake",
-        contract_type: s.type === "matches" ? "DIGITMATCH" : "DIGITDIFF",
+        contract_type: "DIGITDIFF",
         currency,
         duration: 1,
         duration_unit: "t",
@@ -575,7 +671,7 @@ async function startOAuth() {
     response_type: "code",
     client_id: getAppId(),
     redirect_uri: redirectUri(),
-    scope: "trade",
+    scope: "trade account_manage",
     state: st,
     code_challenge: challenge,
     code_challenge_method: "S256",
@@ -655,6 +751,16 @@ async function connectAccounts() {
       }));
     if (!list.length) throw new Error("No active Options trading accounts found on this login.");
     state.accounts = list;
+    // Owner nickname is best-effort (needs the account_manage scope).
+    derivRest("GET", "/account/v1/nickname")
+      .then((r) => {
+        const nick = r && r.data && r.data.nickname;
+        if (nick) {
+          state.owner = String(nick);
+          renderAccount();
+        }
+      })
+      .catch(() => {});
     const preferred =
       list.find((a) => a.id === state.activeId) || list.find((a) => a.isVirtual) || list[0];
     await openTradeSocket(preferred);
@@ -796,6 +902,7 @@ function clearCred() {
   state.account = null;
   state.accounts = [];
   state.activeId = null;
+  state.owner = null;
   state.realArmed = false;
   if (state.tradeMode === "live") {
     state.tradeMode = "sim";
@@ -814,6 +921,7 @@ function disconnect() {
 
 function onTick(tick) {
   const pip = Number.isFinite(Number(tick.pip_size)) ? Number(tick.pip_size) : 2;
+  state.lastPip = pip;
   const quoteStr = Number(tick.quote).toFixed(pip);
   const digit = Number(quoteStr.charAt(quoteStr.length - 1));
 
@@ -841,29 +949,19 @@ function onTick(tick) {
 /**
  * Smart entry — a pacing filter, NOT an edge (ticks are independent, so the
  * odds per trade don't change; it just trades less often).
- *   Differs: skip the tick right after your digit hit.
- *   Matches: only enter after your digit has been absent for 3 ticks.
+ * Differs: skip the tick right after your digit hit.
  */
 function passesEntryFilter() {
   if (!state.settings.smartEntry) return true;
-  const s = state.settings;
-  const prev = (i) => state.trail[i + 1];
-  if (s.type === "matches") {
-    for (let i = 0; i < 3; i++) {
-      const t = prev(i);
-      if (t && t.digit === s.digit) return false;
-    }
-    return true;
-  }
-  const p = prev(0);
-  return !(p && p.digit === s.digit);
+  const p = state.trail[1];
+  return !(p && p.digit === state.settings.digit);
 }
 
 /* ----------------------------- simulation core --------------------------- */
 
 function settleSimTrade(resultDigit) {
   const s = state.settings;
-  const win = s.type === "matches" ? resultDigit === s.digit : resultDigit !== s.digit;
+  const win = resultDigit !== s.digit;
   const m = state.payout.multiplier;
   const pnl = win ? Math.round(s.stake * (m - 1) * 100) / 100 : -s.stake;
   settleShared({ win, stake: s.stake, pnl, mult: win ? m : 0, resultDigit, type: s.type, digit: s.digit, symbol: s.symbol, live: false });
@@ -899,7 +997,7 @@ async function placeLiveTrade() {
       parameters: {
         amount: s.stake,
         basis: "stake",
-        contract_type: s.type === "matches" ? "DIGITMATCH" : "DIGITDIFF",
+        contract_type: "DIGITDIFF",
         currency: acc.currency,
         duration: 1,
         duration_unit: "t",
@@ -952,12 +1050,19 @@ function onProposalOpenContract(poc) {
   const payout = Number(poc.payout);
   const profit = Number(poc.profit);
   const pnl = Number.isFinite(profit) ? profit : (Number(poc.sell_price) || 0) - stake;
-  const win = pnl > 0;
-  const resultDigit =
-    lastDigitOf(poc.exit_tick_display_value) ??
-    lastDigitOf(poc.exit_spot_display_value) ??
-    lastDigitOf(poc.exit_tick_display) ??
-    null;
+  const win = poc.status === "won" ? true : poc.status === "lost" ? false : pnl > 0;
+  // exit_spot can arrive without trailing zeros ("572.2"), so re-pad it to
+  // the market's pip size before reading the last digit.
+  let resultDigit = null;
+  const exitRaw =
+    poc.exit_spot != null
+      ? poc.exit_spot
+      : Array.isArray(poc.tick_stream) && poc.tick_stream.length
+        ? poc.tick_stream[poc.tick_stream.length - 1].tick
+        : null;
+  if (exitRaw != null && Number.isFinite(Number(exitRaw))) {
+    resultDigit = lastDigitOf(Number(exitRaw).toFixed(state.lastPip));
+  }
   settleShared({
     win,
     stake,
@@ -985,6 +1090,13 @@ function settleShared(t) {
   }
   st.net = Math.round((st.net + t.pnl) * 100) / 100;
 
+  if (t.live) {
+    const d = getDaily();
+    d.net = Math.round((d.net + t.pnl) * 100) / 100;
+    saveDaily();
+    renderDaily();
+  }
+
   state.history.unshift({ ...t, time: new Date() });
   if (state.history.length > HISTORY_LIMIT) state.history.pop();
 
@@ -992,21 +1104,50 @@ function settleShared(t) {
   renderHistory();
   $("result-announcer").textContent = (t.win ? "Win " : "Loss ") + fmtSigned(t.pnl);
   showResultFlash(t.win, t.mult, t.pnl);
+  playResultSound(t.win);
   checkRiskLimits();
 }
 
 function checkRiskLimits() {
   const net = state.stats.net;
   const { tp, sl } = state.settings;
-  if (tp != null && net >= tp) {
-    state.running = false;
-    renderControls();
-    toast("Take profit reached (" + fmtSigned(net) + ") — stopped.", "success");
-  } else if (sl != null && net <= -sl) {
-    state.running = false;
-    renderControls();
-    toast("Stop loss reached (" + fmtSigned(net) + ") — stopped.", "error");
+  if (state.running && state.tradeMode === "live") {
+    const lock = dailyLock();
+    if (lock) {
+      haltRun();
+      toast(
+        lock === "loss"
+          ? "Daily loss cap hit (" + fmtSigned(getDaily().net) + " today) — live trading locked until tomorrow."
+          : "Daily profit target hit (" + fmtSigned(getDaily().net) + " today) — live trading stopped for today.",
+        lock === "loss" ? "error" : "success"
+      );
+      return;
+    }
   }
+  if (tp != null && net >= tp) {
+    haltRun();
+    toast("Session take profit reached (" + fmtSigned(net) + ") — stopped.", "success");
+  } else if (sl != null && net <= -sl) {
+    haltRun();
+    toast("Session stop loss reached (" + fmtSigned(net) + ") — stopped.", "error");
+  }
+}
+
+function haltRun() {
+  state.running = false;
+  state.paused = state.stats.trades > 0;
+  renderControls();
+}
+
+function renderDaily() {
+  const d = getDaily();
+  const lock = dailyLock();
+  const el = $("daily-status");
+  el.textContent =
+    "Today (live): " + (d.net === 0 ? money(0) : fmtSigned(d.net)) +
+    (lock === "loss" ? " · LOCKED — loss cap hit" : lock === "target" ? " · target reached" : "");
+  el.classList.toggle("pl-neg", d.net < 0);
+  el.classList.toggle("pl-pos", d.net > 0);
 }
 
 /* -------------------------------- formatting ----------------------------- */
@@ -1050,6 +1191,7 @@ function renderAll() {
   renderDigitPayouts();
   renderStats();
   renderHistory();
+  renderDaily();
 }
 
 function renderAccount() {
@@ -1060,6 +1202,9 @@ function renderAccount() {
   if (acc) {
     $("account-empty").hidden = true;
     $("account-live").hidden = false;
+    $("account-owner").textContent = state.owner || (acc.isVirtual ? "Demo trader" : "Account holder");
+    $("currency-flag").innerHTML = FLAGS[String(acc.currency).toUpperCase()] || "";
+    $("currency-flag").hidden = !FLAGS[String(acc.currency).toUpperCase()];
     $("balance-value").textContent = money(acc.balance, acc.currency);
     $("balance-currency").textContent = acc.currency;
     $("account-loginid").textContent = acc.id;
@@ -1114,10 +1259,11 @@ function renderControls() {
   startBtn.disabled = state.running;
   $("stop-simulation-btn").disabled = !state.running;
   $("running-indicator").hidden = !state.running;
+  const verb = state.paused ? "Resume" : "Start";
   if (state.tradeMode === "live") {
-    startBtn.textContent = state.account && !state.account.isVirtual ? "Start LIVE trading" : "Start live (demo)";
+    startBtn.textContent = state.account && !state.account.isVirtual ? verb + " LIVE trading" : verb + " live (demo)";
   } else {
-    startBtn.textContent = "Start simulation";
+    startBtn.textContent = verb + " simulation";
   }
 }
 
@@ -1188,12 +1334,6 @@ function renderFreq() {
 }
 
 function renderStrategy() {
-  const isMatches = state.settings.type === "matches";
-  $("trade-type-matches").setAttribute("aria-pressed", String(isMatches));
-  $("trade-type-differs").setAttribute("aria-pressed", String(!isMatches));
-  $("trade-type-description").textContent = isMatches
-    ? "Wins when the last digit EQUALS your digit. Rare (~10%) but pays about 8–9×."
-    : "Wins when the last digit is ANYTHING BUT your digit. Frequent (~90%) but pays about 1.1×.";
   for (const btn of document.querySelectorAll(".digit")) {
     btn.setAttribute("aria-pressed", String(Number(btn.dataset.digit) === state.settings.digit));
   }
@@ -1204,6 +1344,11 @@ function renderStrategy() {
   const slInput = $("stop-loss-input");
   if (document.activeElement !== slInput) slInput.value = state.settings.sl != null ? state.settings.sl : "";
   $("smart-entry-toggle").checked = !!state.settings.smartEntry;
+  $("sound-toggle").checked = !!state.settings.sound;
+  const dcInput = $("daily-loss-cap-input");
+  if (document.activeElement !== dcInput) dcInput.value = state.settings.dailyCap != null ? state.settings.dailyCap : "";
+  const dtInput = $("daily-target-input");
+  if (document.activeElement !== dtInput) dtInput.value = state.settings.dailyTarget != null ? state.settings.dailyTarget : "";
 }
 
 function renderPayout() {
@@ -1250,7 +1395,7 @@ function renderHistory() {
       fmtClock(t.time),
       t.live ? "Live" : "Sim",
       t.symbol,
-      (t.type === "matches" ? "Matches " : "Differs ") + t.digit,
+      "Differs " + t.digit,
       t.digit + " → " + (t.resultDigit == null ? "?" : t.resultDigit),
       money(t.stake),
     ];
@@ -1357,18 +1502,6 @@ function toast(message, kind) {
 
 /* ------------------------------ user actions ----------------------------- */
 
-function setTradeType(type) {
-  if (state.settings.type === type) return;
-  state.settings.type = type;
-  saveSettings();
-  renderStrategy();
-  renderTrail();
-  renderFreq();
-  renderPayout();
-  renderDigitPayouts();
-  keepPayoutsFresh();
-}
-
 function selectDigit(digit) {
   if (state.settings.digit === digit) return;
   state.settings.digit = digit;
@@ -1413,8 +1546,22 @@ function setTradeMode(mode) {
 
 function startRun() {
   if (state.running) return;
-  if (state.tradeMode === "live" && !liveReady()) return;
+  unlockAudio(); // browsers only allow sound after a user gesture
+  if (state.tradeMode === "live") {
+    if (!liveReady()) return;
+    const lock = dailyLock();
+    if (lock) {
+      toast(
+        lock === "loss"
+          ? "Daily loss cap already hit — live trading is locked until tomorrow."
+          : "Daily profit target already reached — live trading is done for today.",
+        "error"
+      );
+      return;
+    }
+  }
   state.running = true;
+  state.paused = false;
   renderControls();
 }
 
@@ -1433,14 +1580,18 @@ function liveReady() {
 
 function stopRun() {
   state.running = false;
+  state.paused = true;
   renderControls();
+  toast("Paused — session kept. Press Resume to continue.", "info");
 }
 
 function resetSession() {
   state.stats = { trades: 0, wins: 0, losses: 0, net: 0, streak: 0 };
   state.history = [];
+  state.paused = false;
   renderStats();
   renderHistory();
+  renderControls();
   toast("Session reset.", "info");
 }
 
@@ -1466,8 +1617,6 @@ function bindEvents() {
   $("trade-mode-live").addEventListener("click", () => setTradeMode("live"));
   $("account-select").addEventListener("change", (e) => switchAccount(e.target.value));
 
-  $("trade-type-matches").addEventListener("click", () => setTradeType("matches"));
-  $("trade-type-differs").addEventListener("click", () => setTradeType("differs"));
   for (const btn of document.querySelectorAll(".digit")) {
     btn.addEventListener("click", () => selectDigit(Number(btn.dataset.digit)));
   }
@@ -1490,6 +1639,23 @@ function bindEvents() {
     state.settings.smartEntry = e.target.checked;
     saveSettings();
   });
+  $("sound-toggle").addEventListener("change", (e) => {
+    state.settings.sound = e.target.checked;
+    saveSettings();
+    if (e.target.checked) {
+      unlockAudio();
+      playResultSound(true);
+    }
+  });
+  const dailyInput = (id, key) =>
+    $(id).addEventListener("change", (e) => {
+      const v = parseFloat(e.target.value);
+      state.settings[key] = Number.isFinite(v) && v > 0 ? v : null;
+      saveSettings();
+      renderDaily();
+    });
+  dailyInput("daily-loss-cap-input", "dailyCap");
+  dailyInput("daily-target-input", "dailyTarget");
 
   $("start-simulation-btn").addEventListener("click", startRun);
   $("stop-simulation-btn").addEventListener("click", stopRun);
@@ -1532,13 +1698,200 @@ function bindEvents() {
   });
 }
 
+/* ---------------------------- AI coach (ChatGPT) ------------------------- */
+
+const AI_SESSION_KEY = "del.aiSession";
+let aiBusy = false;
+
+function aiSessionId() {
+  let id = "";
+  try {
+    id = localStorage.getItem(AI_SESSION_KEY) || "";
+  } catch {
+    /* ignore */
+  }
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
+    id = "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    try {
+      localStorage.setItem(AI_SESSION_KEY, id);
+    } catch {
+      /* ignore */
+    }
+  }
+  return id;
+}
+
+/** Session snapshot sent to the AI — stats + settings only, never tokens or account ids. */
+function aiContext() {
+  const s = state.settings;
+  const acc = state.account;
+  const r = (v) => (v == null ? null : Number(v));
+  return {
+    mode: state.tradeMode,
+    account_type: acc ? (acc.isVirtual ? "demo" : "real") : null,
+    currency: acc ? acc.currency : "USD",
+    balance: acc ? acc.balance : null,
+    symbol: s.symbol,
+    digit: s.digit,
+    stake: s.stake,
+    payout_multiplier: state.payout.multiplier,
+    take_profit: r(s.tp),
+    stop_loss: r(s.sl),
+    daily_loss_cap: r(s.dailyCap),
+    daily_target: r(s.dailyTarget),
+    today_live_net: getDaily().net,
+    trades: state.stats.trades,
+    wins: state.stats.wins,
+    losses: state.stats.losses,
+    net: state.stats.net,
+    streak: state.stats.streak,
+    recent_trades: state.history.slice(0, 60).map((t) => ({
+      live: !!t.live,
+      symbol: t.symbol,
+      digit: t.digit,
+      result_digit: t.resultDigit == null ? null : t.resultDigit,
+      stake: t.stake,
+      pnl: t.pnl,
+      win: !!t.win,
+    })),
+  };
+}
+
+/** POSTs to an SSE endpoint and feeds each text delta to onDelta. Resolves with the full text. */
+async function aiStream(path, body, onDelta) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) throw new Error("The AI is unavailable right now (HTTP " + res.status + ").");
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let full = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 2);
+      if (!line.startsWith("data:")) continue;
+      let ev;
+      try {
+        ev = JSON.parse(line.slice(5));
+      } catch {
+        continue;
+      }
+      if (ev.error) throw new Error(ev.error);
+      if (ev.delta) {
+        full += ev.delta;
+        onDelta(full);
+      }
+    }
+  }
+  return full;
+}
+
+function setAiBusy(busy) {
+  aiBusy = busy;
+  $("ai-coach-btn").disabled = busy;
+  $("ai-send-btn").disabled = busy;
+  $("ai-coach-btn").textContent = busy ? "Thinking…" : "Analyze my session";
+}
+
+async function runCoach() {
+  if (aiBusy) return;
+  const out = $("ai-coach-output");
+  out.hidden = false;
+  out.classList.remove("ai-msg", "error");
+  out.textContent = "";
+  out.classList.add("typing");
+  setAiBusy(true);
+  try {
+    await aiStream("/api/ai/coach", { context: aiContext() }, (t) => {
+      out.textContent = t;
+    });
+  } catch (err) {
+    out.textContent = errText(err);
+  } finally {
+    out.classList.remove("typing");
+    setAiBusy(false);
+  }
+}
+
+function addAiMessage(role, text) {
+  $("ai-empty").hidden = true;
+  const el = document.createElement("div");
+  el.className = "ai-msg " + role;
+  el.textContent = text;
+  const list = $("ai-messages");
+  list.appendChild(el);
+  list.scrollTop = list.scrollHeight;
+  return el;
+}
+
+async function sendAiMessage() {
+  const input = $("ai-input");
+  const text = input.value.trim();
+  if (!text || aiBusy) return;
+  input.value = "";
+  addAiMessage("user", text);
+  const bubble = addAiMessage("assistant", "");
+  bubble.classList.add("typing");
+  setAiBusy(true);
+  try {
+    await aiStream("/api/ai/chat", { session_id: aiSessionId(), message: text, context: aiContext() }, (t) => {
+      bubble.textContent = t;
+      $("ai-messages").scrollTop = $("ai-messages").scrollHeight;
+    });
+  } catch (err) {
+    bubble.textContent = errText(err);
+    bubble.classList.add("error");
+  } finally {
+    bubble.classList.remove("typing");
+    setAiBusy(false);
+    input.focus();
+  }
+}
+
+async function loadAiHistory() {
+  try {
+    const res = await fetch("/api/ai/chat/" + encodeURIComponent(aiSessionId()));
+    if (!res.ok) return;
+    const data = await res.json();
+    for (const m of (data && data.messages) || []) addAiMessage(m.role, m.text);
+  } catch {
+    /* no backend (e.g. CodePen) — chat starts empty */
+  }
+}
+
+async function clearAiChat() {
+  try {
+    await fetch("/api/ai/chat/" + encodeURIComponent(aiSessionId()), { method: "DELETE" });
+  } catch {
+    /* ignore */
+  }
+  const list = $("ai-messages");
+  for (const el of Array.from(list.querySelectorAll(".ai-msg"))) el.remove();
+  $("ai-empty").hidden = false;
+}
+
 /* ---------------------------------- init --------------------------------- */
 
 async function init() {
   loadSettings();
   loadCred();
   bindEvents();
+  $("ai-coach-btn").addEventListener("click", runCoach);
+  $("ai-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    sendAiMessage();
+  });
+  $("ai-clear-btn").addEventListener("click", clearAiChat);
   renderAll();
+  loadAiHistory();
   await loadConfig();
   renderAll();
   connectPublic();

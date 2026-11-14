@@ -1,0 +1,116 @@
+{
+  "iteration": 2,
+  "mode": "retest",
+  "passed": 15,
+  "failed": 0,
+  "bugs": [],
+  "action_items": [],
+  "retest_needed": false,
+  "checks": [
+    {
+      "criterion": "Backend API - GET /api/deriv/config",
+      "name": "test_tscheck_deriv_config.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "GET /api/deriv/config -> 200 {app_id: 34XxijT4LuhpHEsZVPfoc, oauth_ready: true, oauth_authorize_url: https://auth.deriv.com/oauth2/auth}"
+    },
+    {
+      "criterion": "Backend API - GET /api/deriv/callback",
+      "name": "test_tscheck_deriv_callback.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "GET /api/deriv/callback?code=tscheck-code&state=tscheck-state -> 200 html bridge page"
+    },
+    {
+      "criterion": "Backend API - POST /api/deriv/token validation/errors",
+      "name": "test_tscheck_deriv_token.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "bogus code -> 400; short verifier -> 422; bad redirect_uri -> 400 (all via httpx against :8001, re-run: 5 passed in 0.99s)"
+    },
+    {
+      "criterion": "Matches removed, Differs only",
+      "name": "matches-removed-differs-only",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "trade-type-matches element absent; contract-type shows 'Digit Differs'; digit-pay-3 ~1.0-1.1x once quotes arrive; a settled Differs-3 sim trade shows history row text matching /Differs\\s*3/i"
+    },
+    {
+      "criterion": "Start / Pause / Resume",
+      "name": "start-pause-resume-simulation",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Start -> running-indicator visible; after 1+ trades settle, Pause shows toast 'Paused', running-indicator hidden, stat-wins/losses and history row count unchanged, start button text becomes 'Resume simulation'; clicking it resumes and more history rows accumulate; Reset restores 'Start simulation' label and stat-wins=0"
+    },
+    {
+      "criterion": "Sound alerts toggle",
+      "name": "sound-alerts-toggle-persists",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "sound-toggle checked by default; toggling off sets del.settings.sound=false, persists across reload; toggling back on + running a sim trade to settlement with sound on produced no pageerror events"
+    },
+    {
+      "criterion": "Daily limits inputs",
+      "name": "daily-limits-inputs",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "daily-loss-cap-input=50/daily-target-input=100 persist in del.settings.dailyCap/dailyTarget across reload; daily-status shows 'Today (live): $0.00' before and after a settled sim trade (sim doesn't touch live P/L); pre-seeding del.daily={date:today,net:-60} with cap 50 + reload renders daily-status containing 'LOCKED'"
+    },
+    {
+      "criterion": "Live trade gating unchanged",
+      "name": "live-trade-gating-without-account",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Re-run persisted check: clicking trade-mode-live while disconnected opens deriv-account-modal; mode-badge stays 'Simulation'"
+    },
+    {
+      "criterion": "OAuth scope",
+      "name": "oauth-login-start",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "oauth-connect-button click navigates (intercepted) to https://auth.deriv.com/oauth2/auth with client_id=34XxijT4LuhpHEsZVPfoc and scope='trade account_manage' (updated from the old single-scope 'trade' assertion)"
+    },
+    {
+      "criterion": "OAuth return + token errors handled",
+      "name": "oauth-return-and-token-errors",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Re-run persisted check: callback with bogus code lands back at / with hash wiped + toast; invalid PAT shows connect-error containing 'reject'. One expected console 401 from api.derivws.com per spec_deviations."
+    },
+    {
+      "criterion": "Core regression - live market data",
+      "name": "live-market-data-connects",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "connection-status reaches 'Live · R_100', tick-trail fills, symbol switch re-subscribes. Re-run on both localhost:3000 and public preview URL https://deriv-edge-lab--3mg3a37k.preview.emergentagent.com"
+    },
+    {
+      "criterion": "Core regression - digit payout ticker",
+      "name": "digit-payout-ticker-live",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "digit-pay-5 drops '≈' once quotes arrive, settles ~1.0-1.1x (Differs-only now); payout-info matches selected digit's payout (updated: removed obsolete Matches-switch assertion)"
+    },
+    {
+      "criterion": "Core regression - simulate mode end to end",
+      "name": "simulate-mode-end-to-end",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Digit 5 + $5 stake + Start -> trade settles, stats/history populate; Pause (updated from obsolete Stop testid to pause-simulation-btn) hides running-indicator; Reset clears stat-wins/losses to 0"
+    },
+    {
+      "criterion": "Core regression - risk guard auto stop",
+      "name": "risk-guard-auto-stop",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Digit 5, $5 stake, stop-loss=$2 under Differs (updated: removed obsolete trade-type-matches click) -> toast-container shows a stop message and start-simulation-btn re-enables"
+    }
+  ],
+  "notes": [
+    "7 acceptance_matrix criteria covered by 14 artifacts (3 backend test files + 11 browser checks; 'Core regression' bundled 4 sub-checks since it names multiple distinct behaviors).",
+    "Fixed 4 pre-existing checks that referenced the removed Matches trade type (digit-payout-ticker-live, risk-guard-auto-stop) and the renamed pause button testid (simulate-mode-end-to-end), plus updated oauth-login-start's scope assertion from 'trade' to 'trade account_manage'.",
+    "Added 4 new named checks for newly-introduced criteria: matches-removed-differs-only, start-pause-resume-simulation, sound-alerts-toggle-persists, daily-limits-inputs.",
+    "All backend tests pass against the live uvicorn server on :8001 (5 passed in 0.99s). All browser checks pass against :3000; live-market-data-connects additionally re-verified against the public preview URL.",
+    "Actual live trade execution on an authenticated Deriv account remains untestable without user credentials, per spec_deviations/seed_facts."
+  ]
+}

@@ -33,7 +33,24 @@ Single-page **vanilla HTML/CSS/JS** Deriv digit bot. Two modes:
 - sessionStorage: `del.cred` {token, kind oauth|pat, expiresAt}, `del.activeAccount`, `del.pkce` {verifier,state}
 - localStorage: `del.settings` (symbol/type/digit/stake/smartEntry/tp/sl), `del.appid` override
 
+## AI coach (ChatGPT, GPT 6 Sol via emergentintegrations + EMERGENT_LLM_KEY) — `backend/routers/ai.py`
+- Advice only: AI cannot start/stop/place trades. System prompt enforces honesty (house edge, ~93% break-even, no profit promises).
+- `POST /api/ai/coach` {context: SessionContext} → SSE stream `data: {"delta"}` … `{"done":true}` | `{"error"}`
+- `POST /api/ai/chat` {session_id (8–64 [A-Za-z0-9_-]), message (1–2000), context?} → SSE; on done stores user+assistant
+  in Mongo `ai_messages` {session_id, role, text, created_at}; last 20 replayed as history.
+- `GET /api/ai/chat/{session_id}` → {session_id, messages[]}; `DELETE /api/ai/chat/{session_id}` → {deleted}
+- Frontend: `ai-card` (ai-coach-btn, ai-coach-output, ai-messages, ai-input, ai-send-btn, ai-clear-btn); browser session id in
+  localStorage `del.aiSession`. Context sent = stats/settings/recent trades only (never tokens/account ids).
+
 ## Features
+v3 (current): DIFFERS ONLY (Matches removed; all requests hardcode DIGITDIFF). Start / Pause (Pause keeps session,
+Start reads "Resume"), sound alerts (WebAudio chime win / buzz loss, toggle `sound-toggle`), daily LIVE loss cap +
+daily profit target (localStorage `del.daily` {date,net}; live trades only; locks live Start for the rest of the day),
+account card shows owner nickname (GET /account/v1/nickname, scope account_manage — OAuth now requests
+"trade account_manage"; fallback "Demo trader"/"Account holder"), "Verified" badge (= Deriv-authenticated connection,
+NOT a KYC claim), currency flag SVG (USD/EUR/GBP/AUD), Demo/Real badge. Live exit digit read from poc.exit_spot padded to pip.
+
+v2:
 Live ticks, last-10 strip, 100-tick frequency, Matches/Differs, digits 0–9 with live payout each, fixed stake + chips,
 take-profit / stop-loss auto stop, smart-entry pacing filter (NOT an edge), big ×multiplier win/loss flash,
 stats (wins/losses/win rate/net P/L/streak), history (Sim/Live column), account switcher (Demo/Real), labeled

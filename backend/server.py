@@ -20,6 +20,7 @@ from lib.db import client, db, ensure_indexes
 
 # Resource routers (each exports its own APIRouter, mounted on api_router below)
 from routers.deriv import router as deriv_router
+from routers.ai import router as ai_router
 
 
 # Startup runs before the yield, shutdown after it. Add your own setup/teardown here.
@@ -68,6 +69,7 @@ async def get_status_checks():
 
 # Resource routers (each exports its own APIRouter)
 api_router.include_router(deriv_router)
+api_router.include_router(ai_router)
 
 # Include the router in the main app
 app.include_router(api_router)

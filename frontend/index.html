@@ -60,7 +60,15 @@
             <button class="btn btn-primary" id="connect-button" data-testid="connect-button" type="button">Connect account</button>
           </div>
           <div id="account-live" hidden>
+            <div class="owner-row">
+              <span class="owner-name" id="account-owner" data-testid="account-owner"></span>
+              <span class="badge badge-verified" id="account-verified" data-testid="account-verified">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+                Verified
+              </span>
+            </div>
             <div class="balance-row">
+              <span class="flag" id="currency-flag" data-testid="currency-flag" aria-hidden="true"></span>
               <span class="balance" id="balance-value" data-testid="balance-value">—</span>
               <span class="currency" id="balance-currency" data-testid="balance-currency"></span>
               <span class="badge badge-demo" id="account-type" data-testid="account-type">Demo</span>
@@ -109,12 +117,11 @@
             Simulate scores every tick virtually — nothing is ever sent to Deriv. Live trade places real 1-tick contracts on your connected account.
           </p>
 
-          <div class="card-kicker sub">Trade type</div>
-          <div class="seg" role="group" aria-label="Trade type" data-testid="trade-type-toggle">
-            <button class="seg-btn" id="trade-type-matches" data-testid="trade-type-matches" type="button" aria-pressed="false">Matches</button>
-            <button class="seg-btn" id="trade-type-differs" data-testid="trade-type-differs" type="button" aria-pressed="true">Differs</button>
-          </div>
-          <p class="hint" id="trade-type-description" data-testid="trade-type-description"></p>
+          <div class="card-kicker sub">Contract</div>
+          <div class="contract-pill" data-testid="contract-type">Digit Differs</div>
+          <p class="hint" id="trade-type-description" data-testid="trade-type-description">
+            Wins when the last digit is ANYTHING BUT your digit — about 9 in 10 ticks.
+          </p>
 
           <label class="field-label" for="stake-input">Fixed stake</label>
           <div class="stake-row">
@@ -139,6 +146,16 @@
             <input class="input" id="take-profit-input" data-testid="take-profit-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Take profit $" />
             <input class="input" id="stop-loss-input" data-testid="stop-loss-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Stop loss $" />
           </div>
+          <label class="field-label" for="daily-loss-cap-input">Daily limits · live trading</label>
+          <div class="risk-row">
+            <input class="input" id="daily-loss-cap-input" data-testid="daily-loss-cap-input" type="number" min="0" step="1" inputmode="decimal" placeholder="Daily loss cap $" />
+            <input class="input" id="daily-target-input" data-testid="daily-target-input" type="number" min="0" step="1" inputmode="decimal" placeholder="Daily target $" />
+          </div>
+          <p class="hint" id="daily-status" data-testid="daily-status">Today (live): $0.00</p>
+          <label class="check-row" for="sound-toggle">
+            <input type="checkbox" id="sound-toggle" data-testid="sound-toggle" checked />
+            <span>Sound alerts on every win and loss</span>
+          </label>
           <label class="check-row" for="smart-entry-toggle">
             <input type="checkbox" id="smart-entry-toggle" data-testid="smart-entry-toggle" checked />
             <span>Smart entry — skip ticks right after your digit hits</span>
@@ -146,7 +163,7 @@
         </section>
 
         <section class="card matrix-card" data-testid="digit-matrix-card">
-          <div class="card-kicker">Select digit 0–9 · live payout per digit</div>
+          <div class="card-kicker">Select digit 0–9 · live Differs payout per digit</div>
           <div class="digit-grid" id="digit-grid" role="group" aria-label="Digit selection">
             <button class="digit" type="button" data-testid="digit-button-0" data-digit="0" aria-pressed="false"><span class="digit-num">0</span><span class="digit-pay" data-testid="digit-pay-0" data-digit-pay="0">—</span></button>
             <button class="digit" type="button" data-testid="digit-button-1" data-digit="1" aria-pressed="false"><span class="digit-num">1</span><span class="digit-pay" data-testid="digit-pay-1" data-digit-pay="1">—</span></button>
@@ -162,7 +179,7 @@
           <p class="hint">Keys 0–9 pick a digit · ← → adjust.</p>
           <div class="run-row">
             <button class="btn btn-primary btn-lg" id="start-simulation-btn" data-testid="start-simulation-btn" type="button">Start simulation</button>
-            <button class="btn btn-stop btn-lg" id="stop-simulation-btn" data-testid="stop-simulation-btn" type="button" disabled>Stop</button>
+            <button class="btn btn-stop btn-lg" id="stop-simulation-btn" data-testid="pause-simulation-btn" type="button" disabled>Pause</button>
           </div>
           <div class="run-indicator" id="running-indicator" data-testid="running-indicator" hidden>
             <span class="pulse-dot"></span>Running — one trade per tick
@@ -224,6 +241,28 @@
           <div class="freq" id="digit-frequency" data-testid="digit-frequency"></div>
         </section>
       </div>
+
+      <section class="card ai-card" data-testid="ai-card">
+        <div class="ai-head">
+          <div>
+            <div class="card-kicker">AI coach · ChatGPT</div>
+            <p class="hint ai-sub">Reads your session stats and settings and gives advice. It can't place, start or stop trades.</p>
+          </div>
+          <button class="btn btn-primary" id="ai-coach-btn" data-testid="ai-coach-btn" type="button">Analyze my session</button>
+        </div>
+        <div class="ai-coach-out" id="ai-coach-output" data-testid="ai-coach-output" aria-live="polite" hidden></div>
+
+        <div class="ai-chat" data-testid="ai-chat">
+          <div class="ai-messages" id="ai-messages" data-testid="ai-messages">
+            <p class="empty muted" id="ai-empty" data-testid="ai-empty">Ask anything — e.g. "What stake fits a $10,000 demo balance?"</p>
+          </div>
+          <form class="ai-form" id="ai-form" data-testid="ai-form" novalidate>
+            <input class="input" id="ai-input" data-testid="ai-input" type="text" maxlength="2000" autocomplete="off" placeholder="Ask the AI coach…" />
+            <button class="btn btn-primary" id="ai-send-btn" data-testid="ai-send-btn" type="submit">Send</button>
+            <button class="btn btn-ghost" id="ai-clear-btn" data-testid="ai-clear-btn" type="button">Clear</button>
+          </form>
+        </div>
+      </section>
 
       <footer class="disclaimer" data-testid="disclaimer">
         Simulate mode never sends anything to Deriv. Live trade mode places real 1-tick contracts on the account YOU connect
