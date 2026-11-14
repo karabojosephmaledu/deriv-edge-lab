@@ -841,7 +841,12 @@ button { font-family: inherit; }
 .last-trade.win { border-color: rgba(16, 185, 129, 0.6); color: var(--win-soft); }
 .last-trade.loss { border-color: rgba(239, 68, 68, 0.6); color: var(--loss-soft); }
 
-.history-scroll { max-height: 430px; overflow-y: auto; }
+.history-card { align-self: start; }
+.history-scroll { height: 236px; max-height: 236px; overflow-y: auto; }
+.acct-tx { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px; }
+.acct-tx-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 150px; overflow-y: auto; font-size: 12px; }
+.acct-tx-list li { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.redirect-url { display: block; font-size: 11px; word-break: break-all; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-top: 6px; user-select: all; }
 .history-scroll thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
 
 @media (max-width: 680px) {

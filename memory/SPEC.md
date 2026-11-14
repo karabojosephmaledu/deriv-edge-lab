@@ -46,3 +46,9 @@ OAuth completion, account list/switching, balance, owner nickname.
 - bindEvents uses a null-safe on() helper (missing element → console.warn, no crash).
 - Account switch falls back to the previous account on failure; nav account button scrolls to the account card when connected.
 - History: 6 columns (#, Time, Contract, Stake, P/L, Result), row tooltip has market/detail/session total.
+
+## v6 (final fixes)
+- OAuth root cause: Deriv returns "redirect_uri does not match any pre-registered redirect urls" for every tested URL with the
+  configured DERIV_APP_ID. The user must register `<origin>/api/deriv/callback` in developers.deriv.com. The connect dialog shows the exact URL (oauth-redirect-url).
+- Account card: read-only "Verified Deriv transactions" (account-tx-list) via `statement` on the account WS. These are kept separate from the virtual history.
+- History scroll box is fixed at 236px (about 5 rows); the card height doesn't grow.
