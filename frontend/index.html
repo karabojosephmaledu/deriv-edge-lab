@@ -54,8 +54,8 @@
           <div class="card-kicker">Deriv account</div>
           <div id="account-empty">
             <p class="muted account-copy">
-              Connect to trade or simulate on your account. Your token never touches our servers —
-              it is sent only to Deriv, over an encrypted connection.
+              Connect to trade or simulate on your account. Your login token stays in this browser tab and is used only to
+              talk to Deriv (and, for the owner AI coach, to let our server confirm with Deriv who you are — never stored).
             </p>
             <button class="btn btn-primary" id="connect-button" data-testid="connect-button" type="button">Connect account</button>
           </div>
@@ -118,20 +118,56 @@
           </p>
 
           <div class="card-kicker sub">Contract</div>
-          <div class="contract-pill" data-testid="contract-type">Digit Differs</div>
-          <p class="hint" id="trade-type-description" data-testid="trade-type-description">
-            Wins when the last digit is ANYTHING BUT your digit — about 9 in 10 ticks.
-          </p>
+          <div class="seg seg-3" role="group" aria-label="Contract type" data-testid="product-toggle">
+            <button class="seg-btn" id="product-differs" data-testid="product-differs" data-product="differs" type="button" aria-pressed="true">Differs</button>
+            <button class="seg-btn" id="product-accu" data-testid="product-accu" data-product="accu" type="button" aria-pressed="false">Accumulator</button>
+            <button class="seg-btn" id="product-mult" data-testid="product-mult" data-product="mult" type="button" aria-pressed="false">Multiplier</button>
+          </div>
+          <p class="hint" id="trade-type-description" data-testid="trade-type-description"></p>
+
+          <div id="accu-options" data-testid="accu-options" hidden>
+            <label class="field-label">Growth per tick</label>
+            <div class="chips" id="growth-chips">
+              <button class="chip" type="button" data-testid="growth-chip-1" data-growth="0.01">1%</button>
+              <button class="chip" type="button" data-testid="growth-chip-2" data-growth="0.02">2%</button>
+              <button class="chip" type="button" data-testid="growth-chip-3" data-growth="0.03">3%</button>
+              <button class="chip" type="button" data-testid="growth-chip-4" data-growth="0.04">4%</button>
+              <button class="chip" type="button" data-testid="growth-chip-5" data-growth="0.05">5%</button>
+            </div>
+          </div>
+
+          <div id="mult-options" data-testid="mult-options" hidden>
+            <label class="field-label">Direction</label>
+            <div class="seg" role="group" aria-label="Direction">
+              <button class="seg-btn" id="dir-up" data-testid="dir-up" type="button" aria-pressed="true">Up ↑</button>
+              <button class="seg-btn" id="dir-down" data-testid="dir-down" type="button" aria-pressed="false">Down ↓</button>
+            </div>
+            <label class="field-label">Multiplier</label>
+            <div class="chips" id="mult-chips">
+              <button class="chip" type="button" data-testid="mult-chip-40" data-mult="40">×40</button>
+              <button class="chip" type="button" data-testid="mult-chip-100" data-mult="100">×100</button>
+              <button class="chip" type="button" data-testid="mult-chip-200" data-mult="200">×200</button>
+              <button class="chip" type="button" data-testid="mult-chip-300" data-mult="300">×300</button>
+              <button class="chip" type="button" data-testid="mult-chip-400" data-mult="400">×400</button>
+            </div>
+          </div>
+
+          <div id="contract-tp-block" data-testid="contract-tp-block" hidden>
+            <label class="field-label" for="contract-tp-input">Profit target per trade ($)</label>
+            <input class="input" id="contract-tp-input" data-testid="contract-tp-input" type="number" min="0.1" step="0.1" inputmode="decimal" />
+            <p class="hint">The contract closes automatically the moment it is this much in profit. Max loss is always your stake.</p>
+          </div>
 
           <label class="field-label" for="stake-input">Fixed stake</label>
           <div class="stake-row">
             <input class="input" id="stake-input" data-testid="stake-input" type="number" min="0.35" step="0.01" inputmode="decimal" value="1.00" />
           </div>
           <div class="chips" id="stake-chips">
+            <button class="chip" data-testid="stake-chip-0.5" data-stake="0.5" type="button">$0.50</button>
             <button class="chip" data-testid="stake-chip-1" data-stake="1" type="button">$1</button>
+            <button class="chip" data-testid="stake-chip-2" data-stake="2" type="button">$2</button>
             <button class="chip" data-testid="stake-chip-5" data-stake="5" type="button">$5</button>
             <button class="chip" data-testid="stake-chip-10" data-stake="10" type="button">$10</button>
-            <button class="chip" data-testid="stake-chip-25" data-stake="25" type="button">$25</button>
             <button class="chip" data-testid="stake-chip-50" data-stake="50" type="button">$50</button>
             <button class="chip" data-testid="stake-chip-100" data-stake="100" type="button">$100</button>
           </div>
@@ -141,16 +177,18 @@
             <span class="muted payout-detail" id="payout-detail">Estimating from live market…</span>
           </div>
 
-          <label class="field-label" for="take-profit-input">Risk guard · auto stop</label>
+          <label class="field-label" for="take-profit-input">Session stop · this run</label>
           <div class="risk-row">
-            <input class="input" id="take-profit-input" data-testid="take-profit-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Take profit $" />
-            <input class="input" id="stop-loss-input" data-testid="stop-loss-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Stop loss $" />
+            <input class="input" id="take-profit-input" data-testid="take-profit-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Stop when up $" />
+            <input class="input" id="stop-loss-input" data-testid="stop-loss-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Stop when down $" />
           </div>
-          <label class="field-label" for="daily-loss-cap-input">Daily limits · live trading</label>
+          <p class="hint">The bot pauses itself when this run's total profit or loss reaches these amounts. Leave empty for no limit.</p>
+          <label class="field-label" for="daily-loss-cap-input">Daily limits · live trading only</label>
           <div class="risk-row">
-            <input class="input" id="daily-loss-cap-input" data-testid="daily-loss-cap-input" type="number" min="0" step="1" inputmode="decimal" placeholder="Daily loss cap $" />
-            <input class="input" id="daily-target-input" data-testid="daily-target-input" type="number" min="0" step="1" inputmode="decimal" placeholder="Daily target $" />
+            <input class="input" id="daily-loss-cap-input" data-testid="daily-loss-cap-input" type="number" min="0" step="1" inputmode="decimal" placeholder="Max loss today $" />
+            <input class="input" id="daily-target-input" data-testid="daily-target-input" type="number" min="0" step="1" inputmode="decimal" placeholder="Profit goal today $" />
           </div>
+          <p class="hint">Same idea for the whole day of live trades — once hit, live trading stays locked until tomorrow.</p>
           <p class="hint" id="daily-status" data-testid="daily-status">Today (live): $0.00</p>
           <label class="check-row" for="sound-toggle">
             <input type="checkbox" id="sound-toggle" data-testid="sound-toggle" checked />
@@ -163,7 +201,7 @@
         </section>
 
         <section class="card matrix-card" data-testid="digit-matrix-card">
-          <div class="card-kicker">Select digit 0–9 · live Differs payout per digit</div>
+          <div class="card-kicker" id="matrix-kicker">Select digit 0–9 · live Differs payout per digit</div>
           <div class="digit-grid" id="digit-grid" role="group" aria-label="Digit selection">
             <button class="digit" type="button" data-testid="digit-button-0" data-digit="0" aria-pressed="false"><span class="digit-num">0</span><span class="digit-pay" data-testid="digit-pay-0" data-digit-pay="0">—</span></button>
             <button class="digit" type="button" data-testid="digit-button-1" data-digit="1" aria-pressed="false"><span class="digit-num">1</span><span class="digit-pay" data-testid="digit-pay-1" data-digit-pay="1">—</span></button>
@@ -242,7 +280,7 @@
         </section>
       </div>
 
-      <section class="card ai-card" data-testid="ai-card">
+      <section class="card ai-card" data-testid="ai-card" id="ai-card" hidden>
         <div class="ai-head">
           <div>
             <div class="card-kicker">AI coach · ChatGPT</div>
@@ -290,15 +328,6 @@
           </p>
         </div>
 
-        <div class="appid-block">
-          <label class="field-label" for="app-id-input">OAuth App ID</label>
-          <input class="input" id="app-id-input" data-testid="app-id-input" type="text" autocomplete="off" spellcheck="false" />
-          <p class="hint">
-            Your numeric/alphanumeric <strong>App ID</strong> from developers.deriv.com → Apps (prefilled from the server).
-            Needed for both Login with Deriv and API tokens.
-          </p>
-        </div>
-
         <div class="divider" id="token-divider"><span>or connect with an API token</span></div>
 
         <form id="token-form" novalidate>
@@ -306,8 +335,8 @@
           <input class="input" id="token-input" data-testid="token-input" type="password" autocomplete="off" spellcheck="false" placeholder="a1-xxxxxxxxxxxxxxxxxxxx" />
           <p class="hint">
             In Deriv: <a data-testid="token-help-link" href="https://developers.deriv.com/dashboard/" target="_blank" rel="noopener noreferrer">developers.deriv.com → API tokens</a>.
-            Create a token with <strong>Trade</strong> scope. It works together with your App ID above, is stored only in
-            this browser tab and is sent only to Deriv.
+            Create a token with <strong>Trade</strong> scope (add <strong>Account management</strong> to unlock the owner AI coach).
+            It is stored only in this browser tab.
           </p>
           <p class="form-error" id="connect-error" data-testid="connect-error" hidden></p>
           <div class="dialog-actions">

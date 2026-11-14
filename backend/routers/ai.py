@@ -11,14 +11,15 @@ import os
 from datetime import datetime, timezone
 from typing import AsyncIterator, List
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from emergentintegrations.llm.chat import LlmChat, StreamDone, TextDelta, UserMessage
 
 from lib.db import db
+from lib.owner import require_owner
 from models.ai import ChatHistory, ChatMessage, ChatRequest, CoachRequest, SessionContext
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_owner)])
 log = logging.getLogger(__name__)
 
 MODEL_PROVIDER = "openai"
@@ -88,6 +89,12 @@ def _sse_response(gen: AsyncIterator[str]) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/ai/access")
+async def ai_access() -> dict:
+    """Reaches here only when require_owner passed."""
+    return {"owner": True}
 
 
 @router.post("/ai/coach")
