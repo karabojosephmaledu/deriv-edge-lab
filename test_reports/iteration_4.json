@@ -1,0 +1,26 @@
+{
+  "mode": "retest",
+  "iteration": 4,
+  "passed": 2,
+  "failed": 0,
+  "bugs": [],
+  "action_items": [],
+  "retest_needed": false,
+  "checks": [
+    {
+      "criterion": "Mobile no horizontal overflow",
+      "name": "account-area-and-mobile-no-overflow",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Re-ran persisted check at 390x844 after CSS fix (shield white-space normal/width 100%, badge-sim hidden on mobile, section-title badge wraps). Check passed: no horizontal overflow, execution-disabled-note wraps and stays visible, Start/Pause/Stop usable. Only console entry was an expected 401 from an invalid-token connect attempt (per spec deviation)."
+    },
+    {
+      "criterion": "Desktop regression smoke",
+      "name": "differs-ticket-and-trade-pnl",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Re-ran persisted desktop check: Live · R_100 pill visible, Differs session started, history rows produced with P/L shown as +(payout-stake) or -stake. No regressions from the CSS fix."
+    }
+  ],
+  "summary": "Retest of previously failed check 'account-area-and-mobile-no-overflow' after CSS fix in frontend/public/styles.css (680px media query: .shield white-space normal/width 100%, .brand .badge-sim hidden on mobile, section-title badge wraps). Both the mobile overflow check and the desktop Differs session smoke check passed on re-run. No new bugs found."
+}

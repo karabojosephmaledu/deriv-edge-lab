@@ -1,63 +1,44 @@
-# Deriv Edge Lab — SPEC (v2, new Deriv API platform)
+# Deriv Edge Lab — SPEC (v4: research simulator + view-only account)
 
 ## What it is
-Single-page **vanilla HTML/CSS/JS** Deriv digit bot. Two modes:
-- **Simulate** — every tick scored virtually; nothing sent to Deriv.
-- **Live trade** — REAL 1-tick DIGITMATCH/DIGITDIFF contracts bought on the user-selected account.
-  Demo account = virtual funds. Real-money account requires a red "arm" dialog (checkbox) every session.
-  Switching account / disconnecting drops back to Simulate. Max 2 unsettled live contracts at once.
+Vanilla HTML/CSS/JS dashboard (`frontend/index.html`, `frontend/public/app.js`, `frontend/public/styles.css`,
+`frontend/public/favicon.svg`; the React `frontend/src/**` is unused template code) + FastAPI backend.
+Two separate areas:
+1. **Research simulation**: real Deriv ticks (public WS `wss://api.derivws.com/trading/v1/options/ws/public`), VIRTUAL money,
+   NEVER places Deriv contracts. app.js contains no buy/sell calls.
+2. **Connected account (view-only)**: OAuth PKCE (auth.deriv.com, scope "trade account_manage") or API token (PAT +
+   Deriv-App-ID) → GET /trading/v1/options/accounts → account switcher → OTP WS for the balance stream only.
+   "Order execution disabled during testing" note. Owner nickname, Verified badge (= Deriv-authenticated login, not KYC),
+   currency flag, Demo/Real badge.
+The Simulate/Live toggle, arming dialog, daily limits and Matches were removed in v4.
 
-## Files that ARE the app (delivered to user as 3 code sections)
-- `frontend/index.html`, `frontend/public/styles.css`, `frontend/public/app.js`, `frontend/public/favicon.svg` (logo)
-- React `frontend/src/**` is unused template code (index.html does not load it).
+## Simulation engine (app.js: openContract/stepContract, shared by the live session and the comparison tool)
+- One open virtual contract at a time; a new one never opens on the tick that settled one (no duplicates).
+- Differs: opens on tick T, settles on T+1; win if last digit ≠ chosen digit; profit = stake × live Deriv payout ratio − stake
+  (quoted per digit at the current stake); loss = stake. Verified: $50 → payout $54.82 → +$4.82 / −$50.
+- Accumulator: growth 1–5%; knock-out if |Δp/prev| ≥ live `tick_size_barrier` (R_100 3% = 0.0537%); closes at the
+  per-contract profit target or at `maximum_ticks`; loss = stake.
+- Multiplier ×40–400 Up/Down: pnl = stake×m×move% − live commission; stop-out at −stake; closes at the target or after 600 ticks.
+- Ticket (data-testid contract-ticket): stake, payout if win, profit if win, max loss, note — shown before each contract.
+- Session controls: virtual stake, profit target, max session loss, max trades, Start/Pause(→Resume)/Stop(→New session).
+  Limits only stop NEW contracts; Stop lets an open contract settle. Changing the market voids an open contract (not counted).
+- Optional entry filters (per product) and Differs auto-digit (least frequent digit in the last 100 ticks), labelled as hypotheses.
+- Digit explanation (digit-explain): meaning of the selection + frequency/last-seen history, with an explicit no-prediction note.
+- History: up to 500 rows in a scroll box about 10 rows tall (history-scroll), with an individual P/L column and a separate cumulative "Session" column.
+- Last contract box (last-trade) is separate from the session totals (wins/losses/win rate/net/avg win/avg loss/max drawdown).
+- Comparison (lab-run-btn): ticks_history 1000 → 8 rows (Differs fixed/random/auto walk-forward/filtered, Accu ±filter,
+  Mult ±filter); auto uses only past ticks (out-of-sample).
 
-## Deriv platform (developers.deriv.com — NEW API)
-- Public market WS (no auth, reachable from pod): `wss://api.derivws.com/trading/v1/options/ws/public`
-  → ticks + proposal quotes for ALL digits 0–9 (per-digit payout ticker on the digit buttons).
-- OAuth2 Authorization Code + PKCE: `https://auth.deriv.com/oauth2/auth` (client_id = App ID, scope=trade,
-  redirect_uri = `<origin>/api/deriv/callback`). Token exchange via backend (auth.deriv.com has no CORS).
-- Accounts: `GET https://api.derivws.com/trading/v1/options/accounts` (Bearer; PAT also needs `Deriv-App-ID`).
-- Trading: `POST /trading/v1/options/accounts/{id}/otp` → `data.url` → trade WS: `balance` subscribe,
-  `buy` ("1" + parameters, underlying_symbol), `proposal_open_contract` subscribe → settle on `is_sold`.
-- App ID: env `DERIV_APP_ID="34XxijT4LuhpHEsZVPfoc"` (user's registered "Edge5" app, scopes Trade/Account mgmt/App insights).
-  User must ADD redirect URL `https://deriv-edge-lab--3mg3a37k.preview.emergentagent.com/api/deriv/callback`
-  in their Deriv app (currently only their chatgpt.site URL is registered) — otherwise auth.deriv.com rejects redirect.
+## Backend (all under /api)
+- `GET /deriv/config` {app_id, public_ws_url, api_base, oauth_ready, oauth_authorize_url}; `GET /deriv/callback`;
+  `POST /deriv/token` {code, code_verifier 43–128, redirect_uri ending /api/deriv/callback}: 422 bad body, 400 on Deriv error.
+- AI (`routers/ai.py`, all owner-gated by `lib/owner.py`): needs `Authorization: Bearer <deriv token>` (+ `X-Deriv-Token-Kind: pat`);
+  401 without a token, 403 for a non-owner (identity via Deriv GET /account/v1/nickname == OWNER_NICKNAME; the first
+  external_reference_id is pinned in Mongo `app_owner`). `GET /ai/access` → {owner, ai_available}; `POST /ai/coach`, `POST /ai/chat` (SSE);
+  `GET|DELETE /ai/chat/{session_id}` (Mongo `ai_messages`). 503 if EMERGENT_LLM_KEY is unset or emergentintegrations is missing.
+  The AI card stays hidden unless owner && ai_available; requests run only when a button is clicked.
+- Env: MONGO_URL, DB_NAME, CORS_ORIGINS, DERIV_APP_ID="34XxijT4LuhpHEsZVPfoc", OWNER_NICKNAME="client_mqs89p68k33r", EMERGENT_LLM_KEY.
+  `env.example` / `backend/.env.example` hold names only (.gitignore exception added). render.yaml + README for deploy.
 
-## Backend (`backend/routers/deriv.py`, on api_router under /api)
-- `GET /api/deriv/config` → `{app_id, public_ws_url, api_base, oauth_ready, oauth_authorize_url}` (no secrets)
-- `GET /api/deriv/callback` → HTML moving `?code&state` into `/#code=..&state=..`
-- `POST /api/deriv/token` `{code, code_verifier(43–128), redirect_uri(*/api/deriv/callback)}` → `{access_token, expires_in}`;
-  400 with Deriv's error on bad code; 422 on invalid body. Stateless, nothing stored/logged.
-
-## Client storage
-- sessionStorage: `del.cred` {token, kind oauth|pat, expiresAt}, `del.activeAccount`, `del.pkce` {verifier,state}
-- localStorage: `del.settings` (symbol/type/digit/stake/smartEntry/tp/sl), `del.appid` override
-
-## AI coach (ChatGPT, GPT 6 Sol via emergentintegrations + EMERGENT_LLM_KEY) — `backend/routers/ai.py`
-- Advice only: AI cannot start/stop/place trades. System prompt enforces honesty (house edge, ~93% break-even, no profit promises).
-- `POST /api/ai/coach` {context: SessionContext} → SSE stream `data: {"delta"}` … `{"done":true}` | `{"error"}`
-- `POST /api/ai/chat` {session_id (8–64 [A-Za-z0-9_-]), message (1–2000), context?} → SSE; on done stores user+assistant
-  in Mongo `ai_messages` {session_id, role, text, created_at}; last 20 replayed as history.
-- `GET /api/ai/chat/{session_id}` → {session_id, messages[]}; `DELETE /api/ai/chat/{session_id}` → {deleted}
-- Frontend: `ai-card` (ai-coach-btn, ai-coach-output, ai-messages, ai-input, ai-send-btn, ai-clear-btn); browser session id in
-  localStorage `del.aiSession`. Context sent = stats/settings/recent trades only (never tokens/account ids).
-
-## Features
-v3 (current): DIFFERS ONLY (Matches removed; all requests hardcode DIGITDIFF). Start / Pause (Pause keeps session,
-Start reads "Resume"), sound alerts (WebAudio chime win / buzz loss, toggle `sound-toggle`), daily LIVE loss cap +
-daily profit target (localStorage `del.daily` {date,net}; live trades only; locks live Start for the rest of the day),
-account card shows owner nickname (GET /account/v1/nickname, scope account_manage — OAuth now requests
-"trade account_manage"; fallback "Demo trader"/"Account holder"), "Verified" badge (= Deriv-authenticated connection,
-NOT a KYC claim), currency flag SVG (USD/EUR/GBP/AUD), Demo/Real badge. Live exit digit read from poc.exit_spot padded to pip.
-
-v2:
-Live ticks, last-10 strip, 100-tick frequency, Matches/Differs, digits 0–9 with live payout each, fixed stake + chips,
-take-profit / stop-loss auto stop, smart-entry pacing filter (NOT an edge), big ×multiplier win/loss flash,
-stats (wins/losses/win rate/net P/L/streak), history (Sim/Live column), account switcher (Demo/Real), labeled
-synthetic demo feed only if public WS unreachable 3×.
-
-## Honest limits
-No strategy changes digit odds; house edge is fixed by Deriv's payouts. Multipliers shown are Deriv's real payouts
-(~8.9× Matches, ~1.09× Differs) — fake x10/x50 values are intentionally NOT shown.
-
-## No server-side accounts / login. See memory/test_credentials.md.
+## Not testable without the user's Deriv login
+OAuth completion, account list/switching, balance, owner nickname, AI card visibility (owner only).

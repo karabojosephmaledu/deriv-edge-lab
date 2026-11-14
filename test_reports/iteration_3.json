@@ -1,0 +1,123 @@
+{
+  "iteration": 3,
+  "mode": "retest",
+  "passed": 12,
+  "failed": 1,
+  "bugs": [
+    {
+      "severity": "medium",
+      "criterion": "Account area, AI gating, backend, mobile",
+      "title": "Horizontal page overflow at 390x844 mobile viewport",
+      "description": "At a 390px-wide mobile viewport, document.documentElement.scrollWidth exceeds clientWidth by ~165px, forcing horizontal page scroll (violates the criterion's 'no horizontal page overflow' requirement). Root cause: .shield { white-space: nowrap; } in frontend/public/styles.css (around line 232) applied to the 'Order execution disabled during testing — this account is view-only' note, which forces its flex-row container (and the page) wider than the viewport. The topbar mode-badge text also appears clipped in the same screenshot, consistent with page-level horizontal overflow.",
+      "evidence": "run_browser_script 'account-area-and-mobile-no-overflow': page.evaluate(() => scrollWidth - clientWidth) === 165 at viewport 390x844 (expected <= 2). Screenshot account-area-and-mobile-no-overflow-failure.png shows the execution-disabled-note text and header badge cut off / page scrollable right. Backend cross-check: GET /api/deriv/config -> 200 (backend healthy, confirms this is frontend-only CSS issue, not a data/API problem)."
+    }
+  ],
+  "action_items": [
+    {
+      "type": "bug_fix_needed",
+      "detail": "Remove/override 'white-space: nowrap' on .shield (styles.css ~line 232) for narrow viewports, e.g. allow wrapping or 'white-space: normal' under a mobile media query, so the execution-disabled-note and topbar do not force horizontal page overflow at <=390px widths."
+    }
+  ],
+  "retest_needed": true,
+  "checks": [
+    {
+      "criterion": "Account area, AI gating, backend, mobile — GET /api/deriv/config",
+      "name": "test_tscheck_deriv_config.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "GET /api/deriv/config -> 200 {app_id: 34XxijT4LuhpHEsZVPfoc, oauth_ready: true, oauth_authorize_url: https://auth.deriv.com/oauth2/auth}"
+    },
+    {
+      "criterion": "Account area, AI gating, backend, mobile — GET /api/deriv/callback",
+      "name": "test_tscheck_deriv_callback.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "GET /api/deriv/callback?code=tscheck-code&state=tscheck-state -> 200 html bridge page"
+    },
+    {
+      "criterion": "Account area, AI gating, backend, mobile — POST /api/deriv/token validation/errors",
+      "name": "test_tscheck_deriv_token.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "bogus code -> 400; short verifier -> 422 (covers the {} empty-body 422 case); bad redirect_uri -> 400, all via httpx against :8001"
+    },
+    {
+      "criterion": "Account area, AI gating, backend, mobile — AI router owner gating",
+      "name": "test_tscheck_ai_gating.py",
+      "lane": "backend",
+      "status": "passed",
+      "evidence": "New file. GET /ai/access without token -> 401; GET /ai/access with 'Authorization: Bearer bogus' -> 403; POST /ai/coach without token -> 401. Re-run: 'python -m pytest tests/test_tscheck_ai_gating.py' 3 passed in 0.94s"
+    },
+    {
+      "criterion": "Live market feed",
+      "name": "live-market-data-connects",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Re-ran persisted check (pre-existing, still valid in v4): connection-status reaches 'Live · R_100' within 25s, tick-trail fills, symbol switch re-subscribes and pill updates. Verified on localhost:3000 and the public preview URL."
+    },
+    {
+      "criterion": "Differs pre-trade ticket and accurate calc",
+      "name": "differs-ticket-and-trade-pnl",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Stake chip $50 + Differs (default) -> ticket-stake '$50.00', ticket-note contains 'Live Deriv quote' and 'break-even win rate'; ticket-payout parsed 50<payout<60; ticket-profit == payout-50 (±0.05); ticket-loss == '−$50.00'. After Start, first settled history row's P/L is either exactly -$50.00 (loss) or a small positive win amount; stat-pnl matches the row's Session column (±0.01)."
+    },
+    {
+      "criterion": "No duplicate entries",
+      "name": "no-duplicate-history-entries",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Ran a $1 Differs session to 3 settled rows: row '#' numbers are consecutive with no duplicates; walking rows oldest->newest, each row's Session column equals the running cumulative sum of P/L (±0.02); last-trade transitioned from containing 'OPEN' to WIN/LOSS."
+    },
+    {
+      "criterion": "Session controls",
+      "name": "session-controls-lifecycle",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Start -> running-indicator visible, start-btn disabled. After 1 trade settles, Pause -> start-btn text 'Resume', running-text shows 'Paused — session kept', stat-wins/losses unchanged. Resume -> running-indicator visible again. Stop -> start-btn text 'New session', stop-btn disabled. Clicking 'New session' -> label resets to 'Start', stat-wins/losses=0, history cleared to 0 rows."
+    },
+    {
+      "criterion": "Session controls — max trades limit",
+      "name": "session-maxtrades-stops-after-limit",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "session-maxtrades-input=3 with $1 Differs -> history reaches exactly 3 rows, toast-container shows a 'max trades' message, start-btn label no longer 'Start' (session auto-stopped); row count never exceeds 4 (only an already-open contract may still settle)."
+    },
+    {
+      "criterion": "Strategies",
+      "name": "strategies-accu-and-mult",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "product-accu shows accu-options + contract-tp-block, digit-section hidden, ticket-note mentions live barrier % and max ticks; a settled row is labelled 'Accumulator 3%' with detail matching /knocked out|target hit/. product-mult shows mult-options + dir-up, digit-section hidden, ticket-note mentions commission and a stop-out %; a settled row is labelled 'Multiplier ×400 Up'."
+    },
+    {
+      "criterion": "Digit selection explanation + auto digit",
+      "name": "digit-explain-and-auto",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "Clicking digit-button-7 updates digit-explain to mention '7', 'last N ticks' frequency and 'not a prediction'. Enabling auto-digit-toggle makes digit-explain start with 'Auto-selected'; a subsequent settled session row is labelled 'Differs <digit>'."
+    },
+    {
+      "criterion": "History height + comparison",
+      "name": "history-height-and-lab-comparison",
+      "lane": "browser",
+      "status": "passed",
+      "evidence": "history-scroll computed style: max-height ~450px (parsed value between 300-600px) with overflow-y auto/scroll. lab-run-btn click -> lab-table visible within 45s with exactly 8 strategy rows; lab-note text matches /break-even/i."
+    },
+    {
+      "criterion": "Account area, AI gating, backend, mobile",
+      "name": "account-area-and-mobile-no-overflow",
+      "lane": "browser",
+      "status": "failed",
+      "evidence": "No trade-mode-live/app-id-input elements found (correctly absent); ai-card hidden pre-connect; execution-disabled-note visible with 'view-only' text; connect dialog shows oauth-connect-button + token-input; invalid token -> connect-error becomes visible (all passed). FAILED at the mobile-viewport sub-check: at 390x844, scrollWidth-clientWidth == 165 (expected <=2) — real horizontal overflow, see bugs[]."
+    }
+  ],
+  "notes": [
+    "8 acceptance_matrix criteria covered by 13 artifacts (4 backend test files + 9 browser checks; 'Session controls' and 'Account area, AI gating, backend, mobile' each got 2 artifacts given their breadth).",
+    "Per the briefing, all v3 browser checks referencing removed testids (trade-mode-live, pause/start-simulation-btn, daily-* inputs, take-profit/stop-loss-input, deriv-account-modal's old arm flow, app-id-input) were deleted — matches-removed-differs-only, start-pause-resume-simulation, sound-alerts-toggle-persists, daily-limits-inputs, live-trade-gating-without-account, oauth-login-start, oauth-return-and-token-errors, risk-guard-auto-stop, simulate-mode-end-to-end, digit-payout-ticker-live (obsolete 'contract-type' testid) were all removed; live-market-data-connects was kept and re-verified since it still matches v4's criterion 1 exactly.",
+    "Added 1 new backend test file (test_tscheck_ai_gating.py) and 8 new named browser checks for the new v4 acceptance_matrix.",
+    "Debugging note: strategies-accu-and-mult initially flaked because the result-flash win/loss overlay (not dismissed yet) intercepted a force-click on an off-screen product-toggle button; fixed by scrolling to top before switching strategy and using the ×400 multiplier chip to keep the Multiplier contract settlement time bounded.",
+    "Live Deriv tick cadence (~2s) and Differs settlement (~4s) were accounted for with generous (25-90s) waits rather than fixed sleeps.",
+    "spec_deviations acknowledged: Accumulator/Multiplier simulate (not exact) Deriv settlement; comparison results vary per run; a console 401 from api.derivws.com during the invalid-token test is expected; connected-account order execution is intentionally disabled and was not exercised further (no Deriv credentials available, per seed_facts)."
+  ]
+}

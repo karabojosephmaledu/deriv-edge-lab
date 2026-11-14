@@ -92,3 +92,7 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Safe templates (variable names only) are committed
+!.env.example
+!env.example

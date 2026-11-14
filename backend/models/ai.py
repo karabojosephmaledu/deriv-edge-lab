@@ -9,7 +9,9 @@ from pydantic import BaseModel, Field
 class TradeSnapshot(BaseModel):
     live: bool = False
     symbol: str = Field(default="", max_length=20)
-    digit: int = Field(ge=0, le=9)
+    product: str = Field(default="differs", max_length=20)
+    detail: str = Field(default="", max_length=120)
+    digit: Optional[int] = Field(default=None, ge=0, le=9)
     result_digit: Optional[int] = Field(default=None, ge=0, le=9)
     stake: float = Field(ge=0)
     pnl: float
@@ -26,6 +28,13 @@ class SessionContext(BaseModel):
     symbol: str = Field(default="R_100", max_length=20)
     digit: int = Field(default=5, ge=0, le=9)
     stake: float = Field(default=1, ge=0)
+    product: str = Field(default="differs", max_length=20)
+    growth_rate: Optional[float] = None
+    multiplier: Optional[float] = None
+    direction: Optional[str] = Field(default=None, max_length=10)
+    contract_take_profit: Optional[float] = None
+    max_trades: Optional[int] = None
+    max_drawdown: Optional[float] = None
     payout_multiplier: Optional[float] = None
     take_profit: Optional[float] = None
     stop_loss: Optional[float] = None

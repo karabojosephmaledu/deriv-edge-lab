@@ -11,9 +11,12 @@ import os
 from datetime import datetime, timezone
 from typing import AsyncIterator, List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from emergentintegrations.llm.chat import LlmChat, StreamDone, TextDelta, UserMessage
+try:  # optional dependency: the dashboard works without it (AI coach just reports unavailable)
+    from emergentintegrations.llm.chat import LlmChat, StreamDone, TextDelta, UserMessage
+except ImportError:  # pragma: no cover
+    LlmChat = None
 
 from lib.db import db
 from lib.owner import require_owner
@@ -28,9 +31,12 @@ HISTORY_TURNS = 20  # messages of chat history replayed to the model
 
 BASE_RULES = """You are the built-in AI coach of "Deriv Edge Lab", a Deriv Digit Differs bot.
 Facts you must respect:
-- The bot trades ONLY Digit Differs, 1-tick contracts on Volatility indices. A trade wins when the last digit of the
-  next tick is NOT the chosen digit (about 90% of ticks). Every digit is equally likely on every tick; past ticks do not
-  predict the next one.
+- The app is a RESEARCH SIMULATOR: real Deriv Volatility-index ticks, VIRTUAL money, no Deriv contracts placed.
+  Virtual results are not account profits. It simulates three contract types (field "product"):
+  differs = Digit Differs 1 tick (wins if next last digit is not the chosen digit, ~90%);
+  accu = Accumulator (stake grows growth_rate per tick inside a tight barrier; one breach loses the stake; closes at
+  contract_take_profit); mult = Multiplier (P/L = stake x multiplier x move% minus commission; stop-out caps loss at stake).
+  Every digit is equally likely on every tick; past ticks do not predict the next one.
 - Deriv's Differs payout is about 1.07-1.10x the stake, so a win earns roughly 7-10% of the stake and a loss costs 100%.
   Break-even win rate = 1 / payout multiplier (about 92-93%). Over many trades the expected result is a small loss
   per trade (house edge). Say this plainly when relevant.
@@ -47,13 +53,22 @@ def _api_key() -> str:
     return os.environ.get("EMERGENT_LLM_KEY", "")
 
 
+def ai_available() -> bool:
+    return bool(_api_key()) and LlmChat is not None
+
+
+def _require_ai() -> None:
+    if not ai_available():
+        raise HTTPException(status_code=503, detail="AI coach is not configured on this server (set EMERGENT_LLM_KEY)")
+
+
 def _context_block(ctx: SessionContext) -> str:
     data = ctx.model_dump()
     trades = data.pop("recent_trades", [])
     lines = [f"Current session context (JSON): {json.dumps(data, default=str)}"]
     if trades:
         compact = [
-            f"{'L' if t['live'] else 'S'} {t['symbol']} d{t['digit']}->{t['result_digit'] if t['result_digit'] is not None else '?'} "
+            f"{t['product']} {t['symbol']} {t['detail'] or ('d' + str(t['digit']))} "
             f"stake {t['stake']:.2f} pnl {t['pnl']:+.2f}"
             for t in trades[:60]
         ]
@@ -94,12 +109,13 @@ def _sse_response(gen: AsyncIterator[str]) -> StreamingResponse:
 @router.get("/ai/access")
 async def ai_access() -> dict:
     """Reaches here only when require_owner passed."""
-    return {"owner": True}
+    return {"owner": True, "ai_available": ai_available()}
 
 
 @router.post("/ai/coach")
 async def ai_coach(body: CoachRequest) -> StreamingResponse:
     """One-shot analysis of the current session."""
+    _require_ai()
     chat = LlmChat(
         api_key=_api_key(),
         session_id=f"coach-{datetime.now(timezone.utc).timestamp()}",
@@ -117,6 +133,7 @@ async def ai_coach(body: CoachRequest) -> StreamingResponse:
 @router.post("/ai/chat")
 async def ai_chat(body: ChatRequest) -> StreamingResponse:
     """Multi-turn chat; history is stored in Mongo per browser session_id."""
+    _require_ai()
     docs = (
         await db.ai_messages.find({"session_id": body.session_id}, {"_id": 0})
         .sort("created_at", -1)

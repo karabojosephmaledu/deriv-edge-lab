@@ -6,15 +6,12 @@
     <meta name="color-scheme" content="dark" />
     <meta
       name="description"
-      content="Deriv Edge Lab — a clean, premium digit-bot for Deriv Volatility indices. Simulate or trade live on your own Deriv account, with real payouts and risk controls."
+      content="Deriv Edge Lab — research simulator for Deriv Digit Differs, Accumulators and Multipliers on live Volatility Index data, with a read-only connected Deriv account view."
     />
-    <title>Deriv Edge Lab — Deriv Digit Bot</title>
+    <title>Deriv Edge Lab — Research Simulator</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <!-- Fonts: Outfit (headings) + JetBrains Mono (data). System fallbacks apply if offline. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -35,7 +32,7 @@
             </svg>
           </span>
           <span class="brand-name">Deriv Edge Lab</span>
-          <span class="badge badge-sim" id="mode-badge" data-testid="mode-badge">Simulation</span>
+          <span class="badge badge-sim" data-testid="mode-badge">Research · virtual money</span>
         </div>
         <div class="topbar-actions">
           <span class="status-pill" id="connection-status" data-testid="connection-status" role="status">
@@ -48,14 +45,14 @@
     </header>
 
     <main class="shell">
-      <!-- Account -->
+      <!-- ============ CONNECTED ACCOUNT (read-only) ============ -->
       <section class="card account-card" data-testid="account-card">
         <div class="account-info">
-          <div class="card-kicker">Deriv account</div>
+          <div class="card-kicker">Connected account</div>
           <div id="account-empty">
             <p class="muted account-copy">
-              Connect to trade or simulate on your account. Your login token stays in this browser tab and is used only to
-              talk to Deriv (and, for the owner AI coach, to let our server confirm with Deriv who you are — never stored).
+              Connect your Deriv account to view its real balance. Your login token stays in this browser tab and is used
+              only to talk to Deriv (and, for the owner AI coach, to let our server confirm with Deriv who you are — never stored).
             </p>
             <button class="btn btn-primary" id="connect-button" data-testid="connect-button" type="button">Connect account</button>
           </div>
@@ -73,24 +70,24 @@
               <span class="currency" id="balance-currency" data-testid="balance-currency"></span>
               <span class="badge badge-demo" id="account-type" data-testid="account-type">Demo</span>
             </div>
-            <select class="select select-sm" id="account-select" data-testid="account-select" aria-label="Active trading account" hidden></select>
+            <select class="select select-sm" id="account-select" data-testid="account-select" aria-label="Active account" hidden></select>
             <div class="account-meta muted">
               <span id="account-loginid" data-testid="account-loginid"></span>
               <button class="btn btn-ghost btn-sm" id="disconnect-button" data-testid="disconnect-button" type="button">Disconnect</button>
             </div>
           </div>
         </div>
-        <div class="shield">
+        <div class="shield" data-testid="execution-disabled-note">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          <span id="shield-text">Simulate mode — no real trades</span>
+          <span>Order execution disabled during testing — this account is view-only</span>
         </div>
       </section>
 
-      <!-- Live market telemetry -->
+      <!-- ============ LIVE MARKET ============ -->
       <section class="card telemetry-card" data-testid="market-telemetry-card">
         <div class="telemetry-head">
           <div class="telemetry-market">
-            <div class="card-kicker">Live market</div>
+            <div class="card-kicker">Live market · real Deriv data</div>
             <select class="select" id="symbol-select" data-testid="symbol-select" aria-label="Volatility index"></select>
           </div>
           <div class="quote-block" role="status" data-testid="current-quote">
@@ -105,29 +102,25 @@
         </div>
       </section>
 
-      <!-- Main grid: strategy / digit matrix / session metrics -->
+      <!-- ============ RESEARCH SIMULATION ============ -->
+      <div class="section-title" data-testid="research-title">
+        <h2>Research simulation</h2>
+        <span class="badge badge-sim">Virtual money · no Deriv contracts placed</span>
+      </div>
+
       <div class="grid-main">
         <section class="card strategy-card" data-testid="strategy-card">
-          <div class="card-kicker">Trading mode</div>
-          <div class="seg" role="group" aria-label="Trading mode" data-testid="trade-mode-toggle">
-            <button class="seg-btn" id="trade-mode-sim" data-testid="trade-mode-sim" type="button" aria-pressed="true">Simulate</button>
-            <button class="seg-btn" id="trade-mode-live" data-testid="trade-mode-live" type="button" aria-pressed="false">Live trade</button>
+          <div class="card-kicker">Strategy</div>
+          <div class="seg seg-3" role="group" aria-label="Strategy" data-testid="product-toggle">
+            <button class="seg-btn" data-testid="product-differs" data-product="differs" type="button" aria-pressed="true">Differs</button>
+            <button class="seg-btn" data-testid="product-accu" data-product="accu" type="button" aria-pressed="false">Accumulator</button>
+            <button class="seg-btn" data-testid="product-mult" data-product="mult" type="button" aria-pressed="false">Multiplier</button>
           </div>
-          <p class="hint" id="trade-mode-description" data-testid="trade-mode-description">
-            Simulate scores every tick virtually — nothing is ever sent to Deriv. Live trade places real 1-tick contracts on your connected account.
-          </p>
-
-          <div class="card-kicker sub">Contract</div>
-          <div class="seg seg-3" role="group" aria-label="Contract type" data-testid="product-toggle">
-            <button class="seg-btn" id="product-differs" data-testid="product-differs" data-product="differs" type="button" aria-pressed="true">Differs</button>
-            <button class="seg-btn" id="product-accu" data-testid="product-accu" data-product="accu" type="button" aria-pressed="false">Accumulator</button>
-            <button class="seg-btn" id="product-mult" data-testid="product-mult" data-product="mult" type="button" aria-pressed="false">Multiplier</button>
-          </div>
-          <p class="hint" id="trade-type-description" data-testid="trade-type-description"></p>
+          <p class="hint" id="strategy-description" data-testid="strategy-description"></p>
 
           <div id="accu-options" data-testid="accu-options" hidden>
             <label class="field-label">Growth per tick</label>
-            <div class="chips" id="growth-chips">
+            <div class="chips">
               <button class="chip" type="button" data-testid="growth-chip-1" data-growth="0.01">1%</button>
               <button class="chip" type="button" data-testid="growth-chip-2" data-growth="0.02">2%</button>
               <button class="chip" type="button" data-testid="growth-chip-3" data-growth="0.03">3%</button>
@@ -139,11 +132,11 @@
           <div id="mult-options" data-testid="mult-options" hidden>
             <label class="field-label">Direction</label>
             <div class="seg" role="group" aria-label="Direction">
-              <button class="seg-btn" id="dir-up" data-testid="dir-up" type="button" aria-pressed="true">Up ↑</button>
-              <button class="seg-btn" id="dir-down" data-testid="dir-down" type="button" aria-pressed="false">Down ↓</button>
+              <button class="seg-btn" data-testid="dir-up" data-dir="up" type="button" aria-pressed="true">Up ↑</button>
+              <button class="seg-btn" data-testid="dir-down" data-dir="down" type="button" aria-pressed="false">Down ↓</button>
             </div>
             <label class="field-label">Multiplier</label>
-            <div class="chips" id="mult-chips">
+            <div class="chips">
               <button class="chip" type="button" data-testid="mult-chip-40" data-mult="40">×40</button>
               <button class="chip" type="button" data-testid="mult-chip-100" data-mult="100">×100</button>
               <button class="chip" type="button" data-testid="mult-chip-200" data-mult="200">×200</button>
@@ -153,124 +146,107 @@
           </div>
 
           <div id="contract-tp-block" data-testid="contract-tp-block" hidden>
-            <label class="field-label" for="contract-tp-input">Profit target per trade ($)</label>
+            <label class="field-label" for="contract-tp-input">Close each contract at profit ($)</label>
             <input class="input" id="contract-tp-input" data-testid="contract-tp-input" type="number" min="0.1" step="0.1" inputmode="decimal" />
-            <p class="hint">The contract closes automatically the moment it is this much in profit. Max loss is always your stake.</p>
           </div>
 
-          <label class="field-label" for="stake-input">Fixed stake</label>
-          <div class="stake-row">
-            <input class="input" id="stake-input" data-testid="stake-input" type="number" min="0.35" step="0.01" inputmode="decimal" value="1.00" />
-          </div>
-          <div class="chips" id="stake-chips">
+          <label class="field-label" for="stake-input">Virtual stake per contract ($)</label>
+          <input class="input" id="stake-input" data-testid="stake-input" type="number" min="0.35" step="0.01" inputmode="decimal" value="1.00" />
+          <div class="chips">
             <button class="chip" data-testid="stake-chip-0.5" data-stake="0.5" type="button">$0.50</button>
             <button class="chip" data-testid="stake-chip-1" data-stake="1" type="button">$1</button>
             <button class="chip" data-testid="stake-chip-2" data-stake="2" type="button">$2</button>
             <button class="chip" data-testid="stake-chip-5" data-stake="5" type="button">$5</button>
             <button class="chip" data-testid="stake-chip-10" data-stake="10" type="button">$10</button>
             <button class="chip" data-testid="stake-chip-50" data-stake="50" type="button">$50</button>
-            <button class="chip" data-testid="stake-chip-100" data-stake="100" type="button">$100</button>
           </div>
 
-          <div class="payout-box" id="payout-info" data-testid="payout-info">
-            <span class="payout-mult" id="payout-mult">≈1.09×</span>
-            <span class="muted payout-detail" id="payout-detail">Estimating from live market…</span>
+          <div class="ticket" id="contract-ticket" data-testid="contract-ticket">
+            <div><span class="tk-label">Stake</span><span id="tk-stake" data-testid="ticket-stake">—</span></div>
+            <div><span class="tk-label">Payout if win</span><span id="tk-payout" data-testid="ticket-payout">—</span></div>
+            <div><span class="tk-label">Profit if win</span><span class="pl-pos" id="tk-profit" data-testid="ticket-profit">—</span></div>
+            <div><span class="tk-label">Max loss</span><span class="pl-neg" id="tk-loss" data-testid="ticket-loss">—</span></div>
+            <p class="hint tk-note" id="tk-note" data-testid="ticket-note"></p>
           </div>
-
-          <label class="field-label" for="take-profit-input">Session stop · this run</label>
-          <div class="risk-row">
-            <input class="input" id="take-profit-input" data-testid="take-profit-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Stop when up $" />
-            <input class="input" id="stop-loss-input" data-testid="stop-loss-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Stop when down $" />
-          </div>
-          <p class="hint">The bot pauses itself when this run's total profit or loss reaches these amounts. Leave empty for no limit.</p>
-          <label class="field-label" for="daily-loss-cap-input">Daily limits · live trading only</label>
-          <div class="risk-row">
-            <input class="input" id="daily-loss-cap-input" data-testid="daily-loss-cap-input" type="number" min="0" step="1" inputmode="decimal" placeholder="Max loss today $" />
-            <input class="input" id="daily-target-input" data-testid="daily-target-input" type="number" min="0" step="1" inputmode="decimal" placeholder="Profit goal today $" />
-          </div>
-          <p class="hint">Same idea for the whole day of live trades — once hit, live trading stays locked until tomorrow.</p>
-          <p class="hint" id="daily-status" data-testid="daily-status">Today (live): $0.00</p>
-          <label class="check-row" for="sound-toggle">
-            <input type="checkbox" id="sound-toggle" data-testid="sound-toggle" checked />
-            <span>Sound alerts on every win and loss</span>
-          </label>
-          <label class="check-row" for="smart-entry-toggle">
-            <input type="checkbox" id="smart-entry-toggle" data-testid="smart-entry-toggle" checked />
-            <span>Smart entry — skip ticks right after your digit hits</span>
-          </label>
         </section>
 
         <section class="card matrix-card" data-testid="digit-matrix-card">
-          <div class="card-kicker" id="matrix-kicker">Select digit 0–9 · live Differs payout per digit</div>
-          <div class="digit-grid" id="digit-grid" role="group" aria-label="Digit selection">
-            <button class="digit" type="button" data-testid="digit-button-0" data-digit="0" aria-pressed="false"><span class="digit-num">0</span><span class="digit-pay" data-testid="digit-pay-0" data-digit-pay="0">—</span></button>
-            <button class="digit" type="button" data-testid="digit-button-1" data-digit="1" aria-pressed="false"><span class="digit-num">1</span><span class="digit-pay" data-testid="digit-pay-1" data-digit-pay="1">—</span></button>
-            <button class="digit" type="button" data-testid="digit-button-2" data-digit="2" aria-pressed="false"><span class="digit-num">2</span><span class="digit-pay" data-testid="digit-pay-2" data-digit-pay="2">—</span></button>
-            <button class="digit" type="button" data-testid="digit-button-3" data-digit="3" aria-pressed="false"><span class="digit-num">3</span><span class="digit-pay" data-testid="digit-pay-3" data-digit-pay="3">—</span></button>
-            <button class="digit" type="button" data-testid="digit-button-4" data-digit="4" aria-pressed="false"><span class="digit-num">4</span><span class="digit-pay" data-testid="digit-pay-4" data-digit-pay="4">—</span></button>
-            <button class="digit" type="button" data-testid="digit-button-5" data-digit="5" aria-pressed="false"><span class="digit-num">5</span><span class="digit-pay" data-testid="digit-pay-5" data-digit-pay="5">—</span></button>
-            <button class="digit" type="button" data-testid="digit-button-6" data-digit="6" aria-pressed="false"><span class="digit-num">6</span><span class="digit-pay" data-testid="digit-pay-6" data-digit-pay="6">—</span></button>
-            <button class="digit" type="button" data-testid="digit-button-7" data-digit="7" aria-pressed="false"><span class="digit-num">7</span><span class="digit-pay" data-testid="digit-pay-7" data-digit-pay="7">—</span></button>
-            <button class="digit" type="button" data-testid="digit-button-8" data-digit="8" aria-pressed="false"><span class="digit-num">8</span><span class="digit-pay" data-testid="digit-pay-8" data-digit-pay="8">—</span></button>
-            <button class="digit" type="button" data-testid="digit-button-9" data-digit="9" aria-pressed="false"><span class="digit-num">9</span><span class="digit-pay" data-testid="digit-pay-9" data-digit-pay="9">—</span></button>
+          <div id="digit-section">
+            <div class="card-kicker">Digit to avoid (Differs) · live payout per digit</div>
+            <div class="digit-grid" role="group" aria-label="Digit selection">
+              <button class="digit" type="button" data-testid="digit-button-0" data-digit="0" aria-pressed="false"><span class="digit-num">0</span><span class="digit-pay" data-testid="digit-pay-0" data-digit-pay="0">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-1" data-digit="1" aria-pressed="false"><span class="digit-num">1</span><span class="digit-pay" data-testid="digit-pay-1" data-digit-pay="1">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-2" data-digit="2" aria-pressed="false"><span class="digit-num">2</span><span class="digit-pay" data-testid="digit-pay-2" data-digit-pay="2">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-3" data-digit="3" aria-pressed="false"><span class="digit-num">3</span><span class="digit-pay" data-testid="digit-pay-3" data-digit-pay="3">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-4" data-digit="4" aria-pressed="false"><span class="digit-num">4</span><span class="digit-pay" data-testid="digit-pay-4" data-digit-pay="4">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-5" data-digit="5" aria-pressed="false"><span class="digit-num">5</span><span class="digit-pay" data-testid="digit-pay-5" data-digit-pay="5">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-6" data-digit="6" aria-pressed="false"><span class="digit-num">6</span><span class="digit-pay" data-testid="digit-pay-6" data-digit-pay="6">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-7" data-digit="7" aria-pressed="false"><span class="digit-num">7</span><span class="digit-pay" data-testid="digit-pay-7" data-digit-pay="7">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-8" data-digit="8" aria-pressed="false"><span class="digit-num">8</span><span class="digit-pay" data-testid="digit-pay-8" data-digit-pay="8">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-9" data-digit="9" aria-pressed="false"><span class="digit-num">9</span><span class="digit-pay" data-testid="digit-pay-9" data-digit-pay="9">—</span></button>
+            </div>
+            <label class="check-row" for="auto-digit-toggle">
+              <input type="checkbox" id="auto-digit-toggle" data-testid="auto-digit-toggle" />
+              <span>Auto-select: before each contract, pick the digit seen least in the last 100 ticks (research hypothesis)</span>
+            </label>
+            <p class="hint digit-explain" id="digit-explain" data-testid="digit-explain"></p>
           </div>
-          <p class="hint">Keys 0–9 pick a digit · ← → adjust.</p>
+
+          <label class="check-row" for="entry-filter-toggle">
+            <input type="checkbox" id="entry-filter-toggle" data-testid="entry-filter-toggle" />
+            <span id="entry-filter-label">Entry filter</span>
+          </label>
+
+          <label class="field-label">Session limits</label>
+          <div class="risk-row risk-row-3">
+            <input class="input" id="target-input" data-testid="session-target-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Profit target $" />
+            <input class="input" id="maxloss-input" data-testid="session-maxloss-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Max session loss $" />
+            <input class="input" id="maxtrades-input" data-testid="session-maxtrades-input" type="number" min="1" step="1" inputmode="numeric" placeholder="Max trades" />
+          </div>
+          <p class="hint">The session stops opening new virtual contracts when the total reaches the target or the loss limit, or after the trade count. It never changes the loss of a single contract (max = stake).</p>
+
           <div class="run-row">
-            <button class="btn btn-primary btn-lg" id="start-simulation-btn" data-testid="start-simulation-btn" type="button">Start simulation</button>
-            <button class="btn btn-stop btn-lg" id="stop-simulation-btn" data-testid="pause-simulation-btn" type="button" disabled>Pause</button>
+            <button class="btn btn-primary btn-lg" id="start-btn" data-testid="start-btn" type="button">Start</button>
+            <button class="btn btn-outline btn-lg" id="pause-btn" data-testid="pause-btn" type="button" disabled>Pause</button>
+            <button class="btn btn-stop btn-lg" id="stop-btn" data-testid="stop-btn" type="button" disabled>Stop</button>
           </div>
-          <div class="run-indicator" id="running-indicator" data-testid="running-indicator" hidden>
-            <span class="pulse-dot"></span>Running — one trade per tick
-          </div>
+          <div class="run-indicator" id="running-indicator" data-testid="running-indicator" hidden><span class="pulse-dot"></span><span id="running-text">Running</span></div>
+          <label class="check-row" for="sound-toggle">
+            <input type="checkbox" id="sound-toggle" data-testid="sound-toggle" checked />
+            <span>Sound on each result</span>
+          </label>
           <div class="result-flash" id="result-flash" data-testid="result-flash" hidden></div>
         </section>
 
         <section class="card metrics-card" data-testid="session-metrics-card">
-          <div class="card-kicker">Session</div>
+          <div class="card-kicker">Open / last contract (virtual)</div>
+          <div class="last-trade" id="last-trade" data-testid="last-trade">No contract yet.</div>
+
+          <div class="card-kicker sub">Session total (virtual)</div>
           <div class="metric-grid">
-            <div class="tile">
-              <span class="tile-label">Wins</span>
-              <span class="tile-value win" id="stat-wins" data-testid="stat-wins">0</span>
-            </div>
-            <div class="tile">
-              <span class="tile-label">Losses</span>
-              <span class="tile-value loss" id="stat-losses" data-testid="stat-losses">0</span>
-            </div>
-            <div class="tile">
-              <span class="tile-label">Win rate</span>
-              <span class="tile-value" id="stat-win-rate" data-testid="stat-win-rate">—</span>
-            </div>
-            <div class="tile">
-              <span class="tile-label">Net P/L</span>
-              <span class="tile-value" id="stat-pnl" data-testid="stat-pnl">$0.00</span>
-            </div>
+            <div class="tile"><span class="tile-label">Wins</span><span class="tile-value win" id="stat-wins" data-testid="stat-wins">0</span></div>
+            <div class="tile"><span class="tile-label">Losses</span><span class="tile-value loss" id="stat-losses" data-testid="stat-losses">0</span></div>
+            <div class="tile"><span class="tile-label">Win rate</span><span class="tile-value" id="stat-win-rate" data-testid="stat-win-rate">—</span></div>
+            <div class="tile"><span class="tile-label">Net P/L</span><span class="tile-value" id="stat-pnl" data-testid="stat-pnl">$0.00</span></div>
           </div>
           <div class="metric-sub muted">
-            <span id="stat-trades" data-testid="stat-trades">0 trades</span>
-            <span>·</span>
-            <span id="stat-streak" data-testid="stat-streak">streak —</span>
-            <button class="btn btn-ghost btn-sm" id="reset-stats-btn" data-testid="reset-stats-btn" type="button">Reset</button>
+            <span id="stat-trades" data-testid="stat-trades">0 trades</span><span>·</span>
+            <span id="stat-avg" data-testid="stat-avg">avg win — / avg loss —</span><span>·</span>
+            <span id="stat-dd" data-testid="stat-drawdown">max drawdown $0.00</span>
           </div>
           <div class="sr-only" aria-live="polite" id="result-announcer" data-testid="result-announcer"></div>
         </section>
       </div>
 
-      <!-- History + frequency -->
       <div class="grid-bottom">
         <section class="card history-card" data-testid="trade-history-card">
-          <div class="card-kicker">Trade history</div>
-          <div class="table-wrap">
+          <div class="card-kicker">Virtual trade history <span class="muted" id="history-count" data-testid="history-count"></span></div>
+          <div class="table-wrap history-scroll" data-testid="history-scroll">
             <table class="table" data-testid="trade-history-table">
-              <thead>
-                <tr>
-                  <th>Time</th><th>Mode</th><th>Market</th><th>Contract</th><th>Digits</th><th>Stake</th><th>P/L</th><th>Result</th>
-                </tr>
-              </thead>
+              <thead><tr><th>#</th><th>Time</th><th>Market</th><th>Contract</th><th>Detail</th><th>Stake</th><th>P/L</th><th>Session</th><th>Result</th></tr></thead>
               <tbody id="trade-history-body" data-testid="trade-history-body"></tbody>
             </table>
-            <p class="empty muted" id="trade-history-empty" data-testid="trade-history-empty">
-              No trades yet — pick a digit and press Start.
-            </p>
+            <p class="empty muted" id="trade-history-empty" data-testid="trade-history-empty">No virtual contracts yet — choose a strategy and press Start.</p>
           </div>
         </section>
 
@@ -280,19 +256,37 @@
         </section>
       </div>
 
+      <!-- ============ RESEARCH LAB (backtest) ============ -->
+      <section class="card lab-card" data-testid="lab-card">
+        <div class="ai-head">
+          <div>
+            <div class="card-kicker">Strategy comparison · last 1,000 real ticks</div>
+            <p class="hint ai-sub">Replays recent Deriv ticks through each strategy with your stake and settings. Auto-digit is tested walk-forward: each pick uses only ticks before the contract (out-of-sample). Past results do not predict future ones.</p>
+          </div>
+          <button class="btn btn-primary" id="lab-run-btn" data-testid="lab-run-btn" type="button">Run comparison</button>
+        </div>
+        <div class="table-wrap" id="lab-output" data-testid="lab-output" hidden>
+          <table class="table" data-testid="lab-table">
+            <thead><tr><th>Strategy</th><th>Contracts</th><th>Win rate</th><th>Avg win</th><th>Avg loss</th><th>Net P/L</th><th>Max drawdown</th></tr></thead>
+            <tbody id="lab-body"></tbody>
+          </table>
+          <p class="hint" id="lab-note" data-testid="lab-note"></p>
+        </div>
+      </section>
+
+      <!-- ============ AI COACH (owner only, optional) ============ -->
       <section class="card ai-card" data-testid="ai-card" id="ai-card" hidden>
         <div class="ai-head">
           <div>
-            <div class="card-kicker">AI coach · ChatGPT</div>
-            <p class="hint ai-sub">Reads your session stats and settings and gives advice. It can't place, start or stop trades.</p>
+            <div class="card-kicker">AI coach · owner only</div>
+            <p class="hint ai-sub">Reads your virtual session and gives advice. Runs only when you press a button.</p>
           </div>
           <button class="btn btn-primary" id="ai-coach-btn" data-testid="ai-coach-btn" type="button">Analyze my session</button>
         </div>
         <div class="ai-coach-out" id="ai-coach-output" data-testid="ai-coach-output" aria-live="polite" hidden></div>
-
         <div class="ai-chat" data-testid="ai-chat">
           <div class="ai-messages" id="ai-messages" data-testid="ai-messages">
-            <p class="empty muted" id="ai-empty" data-testid="ai-empty">Ask anything — e.g. "What stake fits a $10,000 demo balance?"</p>
+            <p class="empty muted" id="ai-empty" data-testid="ai-empty">Ask anything about the strategies or your session.</p>
           </div>
           <form class="ai-form" id="ai-form" data-testid="ai-form" novalidate>
             <input class="input" id="ai-input" data-testid="ai-input" type="text" maxlength="2000" autocomplete="off" placeholder="Ask the AI coach…" />
@@ -303,40 +297,29 @@
       </section>
 
       <footer class="disclaimer" data-testid="disclaimer">
-        Simulate mode never sends anything to Deriv. Live trade mode places real 1-tick contracts on the account YOU connect
-        and select — demo accounts trade virtual funds, real-money accounts require explicit arming. Trading involves risk;
-        every strategy can lose. Deriv Edge Lab never asks for your password. Not financial advice.
+        Research simulation uses real Deriv market data with virtual money and never places Deriv contracts. Virtual results are
+        not account profits or losses. Simulated Accumulator and Multiplier outcomes are close approximations of Deriv's rules.
+        No strategy can predict the next tick; every contract type carries a house edge. Not financial advice.
       </footer>
     </main>
 
-    <!-- Connect dialog -->
     <dialog class="dialog" id="connect-dialog" data-testid="deriv-account-modal" aria-labelledby="connect-title">
       <div class="dialog-inner">
         <div class="dialog-head">
           <h2 id="connect-title">Connect Deriv account</h2>
-          <p class="dialog-sub">Connect a Demo account to trade virtual funds — or a Real account to trade real money (armed separately).</p>
+          <p class="dialog-sub">View-only during testing — no orders are sent to your account.</p>
         </div>
-
         <div class="oauth-block" id="oauth-block" hidden>
-          <button class="btn btn-primary btn-block" id="oauth-connect-button" data-testid="oauth-connect-button" type="button">
-            Login with Deriv
-          </button>
-          <p class="hint">
-            You approve access on deriv.com and return here automatically. Your password never touches this site —
-            Deriv sends back a scoped session token that stays in this browser. Use an app registration with
-            <strong>Trade</strong> scope to place trades.
-          </p>
+          <button class="btn btn-primary btn-block" id="oauth-connect-button" data-testid="oauth-connect-button" type="button">Login with Deriv</button>
+          <p class="hint">You approve access on deriv.com and return here automatically. Your password never touches this site.</p>
         </div>
-
-        <div class="divider" id="token-divider"><span>or connect with an API token</span></div>
-
+        <div class="divider"><span>or connect with an API token</span></div>
         <form id="token-form" novalidate>
           <label class="field-label" for="token-input">API token</label>
-          <input class="input" id="token-input" data-testid="token-input" type="password" autocomplete="off" spellcheck="false" placeholder="a1-xxxxxxxxxxxxxxxxxxxx" />
+          <input class="input" id="token-input" data-testid="token-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Deriv API token" />
           <p class="hint">
-            In Deriv: <a data-testid="token-help-link" href="https://developers.deriv.com/dashboard/" target="_blank" rel="noopener noreferrer">developers.deriv.com → API tokens</a>.
-            Create a token with <strong>Trade</strong> scope (add <strong>Account management</strong> to unlock the owner AI coach).
-            It is stored only in this browser tab.
+            Create one at <a data-testid="token-help-link" href="https://developers.deriv.com/dashboard/" target="_blank" rel="noopener noreferrer">developers.deriv.com → API tokens</a>
+            with <strong>Trade</strong> scope (add <strong>Account management</strong> to unlock the owner AI coach). Stored only in this browser tab.
           </p>
           <p class="form-error" id="connect-error" data-testid="connect-error" hidden></p>
           <div class="dialog-actions">
@@ -347,29 +330,7 @@
       </div>
     </dialog>
 
-    <!-- Real-money arming dialog -->
-    <dialog class="dialog" id="arm-dialog" data-testid="arm-real-dialog" aria-labelledby="arm-title">
-      <div class="dialog-inner">
-        <div class="dialog-head">
-          <h2 id="arm-title" class="arm-title">Enable real-money trading</h2>
-          <p class="dialog-sub">
-            Contracts will be bought with REAL funds on <strong id="arm-loginid"></strong>. Losses are real money.
-            No strategy can guarantee wins — use the stop-loss guard.
-          </p>
-        </div>
-        <label class="check-row" for="arm-confirm-checkbox">
-          <input type="checkbox" id="arm-confirm-checkbox" data-testid="arm-confirm-checkbox" />
-          <span>I understand this trades real money on my account.</span>
-        </label>
-        <div class="dialog-actions">
-          <button class="btn btn-ghost" type="button" id="arm-cancel-button" data-testid="arm-cancel-button">Cancel</button>
-          <button class="btn btn-stop" type="button" id="arm-enable-button" data-testid="arm-enable-button" disabled>Enable real trading</button>
-        </div>
-      </div>
-    </dialog>
-
     <div class="toast-container" id="toast-container" data-testid="toast-container" aria-live="polite"></div>
-
     <script src="/app.js" defer></script>
   </body>
 </html>

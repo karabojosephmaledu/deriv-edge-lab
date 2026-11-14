@@ -827,6 +827,61 @@ button { font-family: inherit; }
   100% { opacity: 0; }
 }
 
+/* ---------------- Research layout (v4) ---------------- */
+
+.section-title { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.section-title h2 { margin: 0; font: 700 20px/1.2 var(--font-heading); letter-spacing: -0.01em; }
+
+.seg-3 { grid-template-columns: repeat(3, 1fr); }
+.chip.chip-on { border-color: var(--accent-2); background: rgba(37, 99, 235, 0.18); color: #fff; }
+
+.ticket {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 12px;
+  background: var(--panel-2);
+  font-variant-numeric: tabular-nums;
+}
+.ticket > div { display: flex; flex-direction: column; gap: 2px; font-weight: 600; font-size: 15px; }
+.tk-label { font: 600 10px/1 var(--font-heading); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.tk-note { grid-column: 1 / -1; margin-top: 2px; }
+
+.digit-explain { min-height: 3em; }
+.risk-row-3 { grid-template-columns: repeat(3, 1fr); }
+.run-row .btn-lg { padding: 12px 10px; }
+
+.last-trade {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 48px;
+  transition: border-color 0.15s ease;
+}
+.last-trade.open { border-color: rgba(59, 130, 246, 0.6); color: var(--accent-soft); }
+.last-trade.win { border-color: rgba(16, 185, 129, 0.6); color: var(--win-soft); }
+.last-trade.loss { border-color: rgba(239, 68, 68, 0.6); color: var(--loss-soft); }
+
+.history-scroll { max-height: 452px; overflow-y: auto; }
+.history-scroll thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+
+@media (max-width: 680px) {
+  .shield { white-space: normal; width: 100%; }
+  .brand .badge-sim { display: none; }
+  .brand-name { font-size: 15px; }
+  .section-title .badge { white-space: normal; }
+  .risk-row-3 { grid-template-columns: 1fr 1fr; }
+  .run-row { flex-wrap: wrap; }
+  .ticket { grid-template-columns: 1fr 1fr; }
+  .section-title h2 { font-size: 18px; }
+}
+
 /* ---------------- Keyframes ---------------- */
 
 @keyframes pulse-dot {
