@@ -6,7 +6,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import ASCENDING, DESCENDING, IndexModel
+from pymongo import DESCENDING, IndexModel
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 # One entry per collection: every field a route filters, sorts, or dedupes on. Applied by ensure_indexes() at startup.
 INDEXES: dict[str, list[IndexModel]] = {
     "status_checks": [IndexModel([("timestamp", DESCENDING)], name="timestamp_desc")],
-    "ai_messages": [IndexModel([("session_id", ASCENDING), ("created_at", ASCENDING)], name="session_created")],
 }
 
 

@@ -32,13 +32,17 @@ The Simulate/Live toggle, arming dialog, daily limits and Matches were removed i
 ## Backend (all under /api)
 - `GET /deriv/config` {app_id, public_ws_url, api_base, oauth_ready, oauth_authorize_url}; `GET /deriv/callback`;
   `POST /deriv/token` {code, code_verifier 43–128, redirect_uri ending /api/deriv/callback}: 422 bad body, 400 on Deriv error.
-- AI (`routers/ai.py`, all owner-gated by `lib/owner.py`): needs `Authorization: Bearer <deriv token>` (+ `X-Deriv-Token-Kind: pat`);
-  401 without a token, 403 for a non-owner (identity via Deriv GET /account/v1/nickname == OWNER_NICKNAME; the first
-  external_reference_id is pinned in Mongo `app_owner`). `GET /ai/access` → {owner, ai_available}; `POST /ai/coach`, `POST /ai/chat` (SSE);
-  `GET|DELETE /ai/chat/{session_id}` (Mongo `ai_messages`). 503 if EMERGENT_LLM_KEY is unset or emergentintegrations is missing.
-  The AI card stays hidden unless owner && ai_available; requests run only when a button is clicked.
-- Env: MONGO_URL, DB_NAME, CORS_ORIGINS, DERIV_APP_ID="34XxijT4LuhpHEsZVPfoc", OWNER_NICKNAME="client_mqs89p68k33r", EMERGENT_LLM_KEY.
+- Env: MONGO_URL, DB_NAME, CORS_ORIGINS, DERIV_APP_ID. No AI/Emergent dependencies (v5 removed the AI coach, routers/ai.py, lib/owner.py, emergentintegrations).
   `env.example` / `backend/.env.example` hold names only (.gitignore exception added). render.yaml + README for deploy.
 
 ## Not testable without the user's Deriv login
-OAuth completion, account list/switching, balance, owner nickname, AI card visibility (owner only).
+OAuth completion, account list/switching, balance, owner nickname.
+
+## v5 changes (cleanup)
+- Layout restored to original card structure; long explanations removed. Strategy comparison is a collapsible <details> (lab-card).
+- Visible sim controls only: stake-input, session-target-input, session-maxloss-input, start/pause/stop. Background: per-contract
+  TP = 10% of stake (accu/mult), MAX_TRADES=1000, loss limit pre-check (never opens a contract whose loss would breach the limit).
+- Multiplier chips are generated per symbol from Deriv's allowed values (MULTS in app.js); MULT_MAX_TICKS=120.
+- bindEvents uses a null-safe on() helper (missing element → console.warn, no crash).
+- Account switch falls back to the previous account on failure; nav account button scrolls to the account card when connected.
+- History: 6 columns (#, Time, Contract, Stake, P/L, Result), row tooltip has market/detail/session total.

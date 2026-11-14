@@ -308,8 +308,8 @@ button { font-family: inherit; }
 .digit-cell.placeholder { opacity: 0.3; }
 
 @media (max-width: 680px) {
-  .digit-cell { width: 34px; height: 34px; font-size: 13px; }
-  .trail { overflow-x: auto; padding-bottom: 4px; }
+  .digit-cell { width: auto; height: 34px; font-size: 13px; flex: 1 1 0; min-width: 0; }
+  .trail { gap: 4px; }
 }
 
 /* ---------------- Segmented control ---------------- */
@@ -773,51 +773,24 @@ button { font-family: inherit; }
 #daily-status.pl-neg { color: var(--loss); }
 #daily-status.pl-pos { color: var(--win); }
 
-/* ---------------- AI coach ---------------- */
+/* ---------------- Optional strategy comparison ---------------- */
 
-.ai-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-.ai-sub { margin-top: 0; max-width: 560px; }
-
-.ai-coach-out,
-.ai-msg {
-  white-space: pre-wrap;
-  font-size: 13px;
-  line-height: 1.6;
-  border-radius: 12px;
-  padding: 12px 14px;
-}
-
-.ai-coach-out {
-  margin-top: 14px;
-  background: var(--panel-2);
-  border: 1px solid rgba(59, 130, 246, 0.4);
-}
-
-.ai-chat { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; }
-
-.ai-messages {
+.lab-card { padding-top: 16px; padding-bottom: 16px; }
+.lab-summary {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+  font-size: 14px;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: 340px;
-  overflow-y: auto;
-  padding-right: 4px;
+  align-items: center;
+  gap: 8px;
 }
-
-.ai-msg { max-width: 82%; animation: fade-up 0.2s ease; }
-.ai-msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
-.ai-msg.assistant { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); }
-.ai-msg.error { border-color: rgba(239, 68, 68, 0.5); color: var(--loss-soft); }
-
-.ai-form { display: flex; gap: 8px; margin-top: 12px; }
-.ai-form .input { flex: 1; }
-
-.typing::after { content: "▍"; color: var(--accent-2); animation: pulse-dot 1s ease-in-out infinite; }
-
-@media (max-width: 680px) {
-  .ai-msg { max-width: 92%; }
-  .ai-form { flex-wrap: wrap; }
-}
+.lab-summary::-webkit-details-marker { display: none; }
+.lab-summary::before { content: "▸"; color: var(--accent-2); transition: transform 0.2s ease; }
+.lab-card[open] .lab-summary::before { transform: rotate(90deg); }
+.lab-summary .muted { font-weight: 400; font-size: 12px; }
+.lab-body-wrap { margin-top: 12px; display: grid; gap: 10px; justify-items: start; }
+.lab-body-wrap .table-wrap { width: 100%; }
 
 @keyframes flash-in {
   0% { opacity: 0; transform: scale(0.85); }
@@ -868,7 +841,7 @@ button { font-family: inherit; }
 .last-trade.win { border-color: rgba(16, 185, 129, 0.6); color: var(--win-soft); }
 .last-trade.loss { border-color: rgba(239, 68, 68, 0.6); color: var(--loss-soft); }
 
-.history-scroll { max-height: 452px; overflow-y: auto; }
+.history-scroll { max-height: 430px; overflow-y: auto; }
 .history-scroll thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
 
 @media (max-width: 680px) {

@@ -45,15 +45,12 @@
     </header>
 
     <main class="shell">
-      <!-- ============ CONNECTED ACCOUNT (read-only) ============ -->
-      <section class="card account-card" data-testid="account-card">
+      <!-- ============ CONNECTED ACCOUNT (view-only) ============ -->
+      <section class="card account-card" id="account-card" data-testid="account-card">
         <div class="account-info">
-          <div class="card-kicker">Connected account</div>
+          <div class="card-kicker">Deriv account</div>
           <div id="account-empty">
-            <p class="muted account-copy">
-              Connect your Deriv account to view its real balance. Your login token stays in this browser tab and is used
-              only to talk to Deriv (and, for the owner AI coach, to let our server confirm with Deriv who you are — never stored).
-            </p>
+            <p class="muted account-copy">Connect to view your Demo or Real balance. Your token stays in this browser tab.</p>
             <button class="btn btn-primary" id="connect-button" data-testid="connect-button" type="button">Connect account</button>
           </div>
           <div id="account-live" hidden>
@@ -79,7 +76,7 @@
         </div>
         <div class="shield" data-testid="execution-disabled-note">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          <span>Order execution disabled during testing — this account is view-only</span>
+          <span>View-only · no orders are sent</span>
         </div>
       </section>
 
@@ -87,7 +84,7 @@
       <section class="card telemetry-card" data-testid="market-telemetry-card">
         <div class="telemetry-head">
           <div class="telemetry-market">
-            <div class="card-kicker">Live market · real Deriv data</div>
+            <div class="card-kicker">Live market</div>
             <select class="select" id="symbol-select" data-testid="symbol-select" aria-label="Volatility index"></select>
           </div>
           <div class="quote-block" role="status" data-testid="current-quote">
@@ -102,15 +99,10 @@
         </div>
       </section>
 
-      <!-- ============ RESEARCH SIMULATION ============ -->
-      <div class="section-title" data-testid="research-title">
-        <h2>Research simulation</h2>
-        <span class="badge badge-sim">Virtual money · no Deriv contracts placed</span>
-      </div>
-
+      <!-- ============ VIRTUAL SIMULATION ============ -->
       <div class="grid-main">
         <section class="card strategy-card" data-testid="strategy-card">
-          <div class="card-kicker">Strategy</div>
+          <div class="card-kicker">Trade type · virtual</div>
           <div class="seg seg-3" role="group" aria-label="Strategy" data-testid="product-toggle">
             <button class="seg-btn" data-testid="product-differs" data-product="differs" type="button" aria-pressed="true">Differs</button>
             <button class="seg-btn" data-testid="product-accu" data-product="accu" type="button" aria-pressed="false">Accumulator</button>
@@ -136,29 +128,7 @@
               <button class="seg-btn" data-testid="dir-down" data-dir="down" type="button" aria-pressed="false">Down ↓</button>
             </div>
             <label class="field-label">Multiplier</label>
-            <div class="chips">
-              <button class="chip" type="button" data-testid="mult-chip-40" data-mult="40">×40</button>
-              <button class="chip" type="button" data-testid="mult-chip-100" data-mult="100">×100</button>
-              <button class="chip" type="button" data-testid="mult-chip-200" data-mult="200">×200</button>
-              <button class="chip" type="button" data-testid="mult-chip-300" data-mult="300">×300</button>
-              <button class="chip" type="button" data-testid="mult-chip-400" data-mult="400">×400</button>
-            </div>
-          </div>
-
-          <div id="contract-tp-block" data-testid="contract-tp-block" hidden>
-            <label class="field-label" for="contract-tp-input">Close each contract at profit ($)</label>
-            <input class="input" id="contract-tp-input" data-testid="contract-tp-input" type="number" min="0.1" step="0.1" inputmode="decimal" />
-          </div>
-
-          <label class="field-label" for="stake-input">Virtual stake per contract ($)</label>
-          <input class="input" id="stake-input" data-testid="stake-input" type="number" min="0.35" step="0.01" inputmode="decimal" value="1.00" />
-          <div class="chips">
-            <button class="chip" data-testid="stake-chip-0.5" data-stake="0.5" type="button">$0.50</button>
-            <button class="chip" data-testid="stake-chip-1" data-stake="1" type="button">$1</button>
-            <button class="chip" data-testid="stake-chip-2" data-stake="2" type="button">$2</button>
-            <button class="chip" data-testid="stake-chip-5" data-stake="5" type="button">$5</button>
-            <button class="chip" data-testid="stake-chip-10" data-stake="10" type="button">$10</button>
-            <button class="chip" data-testid="stake-chip-50" data-stake="50" type="button">$50</button>
+            <div class="chips" id="mult-chips" data-testid="mult-chips"></div>
           </div>
 
           <div class="ticket" id="contract-ticket" data-testid="contract-ticket">
@@ -172,7 +142,7 @@
 
         <section class="card matrix-card" data-testid="digit-matrix-card">
           <div id="digit-section">
-            <div class="card-kicker">Digit to avoid (Differs) · live payout per digit</div>
+            <div class="card-kicker">Select digit 0–9 · avoid this digit</div>
             <div class="digit-grid" role="group" aria-label="Digit selection">
               <button class="digit" type="button" data-testid="digit-button-0" data-digit="0" aria-pressed="false"><span class="digit-num">0</span><span class="digit-pay" data-testid="digit-pay-0" data-digit-pay="0">—</span></button>
               <button class="digit" type="button" data-testid="digit-button-1" data-digit="1" aria-pressed="false"><span class="digit-num">1</span><span class="digit-pay" data-testid="digit-pay-1" data-digit-pay="1">—</span></button>
@@ -185,25 +155,21 @@
               <button class="digit" type="button" data-testid="digit-button-8" data-digit="8" aria-pressed="false"><span class="digit-num">8</span><span class="digit-pay" data-testid="digit-pay-8" data-digit-pay="8">—</span></button>
               <button class="digit" type="button" data-testid="digit-button-9" data-digit="9" aria-pressed="false"><span class="digit-num">9</span><span class="digit-pay" data-testid="digit-pay-9" data-digit-pay="9">—</span></button>
             </div>
-            <label class="check-row" for="auto-digit-toggle">
-              <input type="checkbox" id="auto-digit-toggle" data-testid="auto-digit-toggle" />
-              <span>Auto-select: before each contract, pick the digit seen least in the last 100 ticks (research hypothesis)</span>
-            </label>
             <p class="hint digit-explain" id="digit-explain" data-testid="digit-explain"></p>
           </div>
 
-          <label class="check-row" for="entry-filter-toggle">
-            <input type="checkbox" id="entry-filter-toggle" data-testid="entry-filter-toggle" />
-            <span id="entry-filter-label">Entry filter</span>
-          </label>
-
-          <label class="field-label">Session limits</label>
-          <div class="risk-row risk-row-3">
-            <input class="input" id="target-input" data-testid="session-target-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Profit target $" />
-            <input class="input" id="maxloss-input" data-testid="session-maxloss-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Max session loss $" />
-            <input class="input" id="maxtrades-input" data-testid="session-maxtrades-input" type="number" min="1" step="1" inputmode="numeric" placeholder="Max trades" />
+          <label class="field-label" for="stake-input">Stake ($)</label>
+          <input class="input" id="stake-input" data-testid="stake-input" type="number" min="0.35" step="0.01" inputmode="decimal" value="1.00" />
+          <div class="risk-row">
+            <div>
+              <label class="field-label" for="target-input">Profit target ($)</label>
+              <input class="input" id="target-input" data-testid="session-target-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Optional" />
+            </div>
+            <div>
+              <label class="field-label" for="maxloss-input">Total loss limit ($)</label>
+              <input class="input" id="maxloss-input" data-testid="session-maxloss-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Optional" />
+            </div>
           </div>
-          <p class="hint">The session stops opening new virtual contracts when the total reaches the target or the loss limit, or after the trade count. It never changes the loss of a single contract (max = stake).</p>
 
           <div class="run-row">
             <button class="btn btn-primary btn-lg" id="start-btn" data-testid="start-btn" type="button">Start</button>
@@ -211,18 +177,11 @@
             <button class="btn btn-stop btn-lg" id="stop-btn" data-testid="stop-btn" type="button" disabled>Stop</button>
           </div>
           <div class="run-indicator" id="running-indicator" data-testid="running-indicator" hidden><span class="pulse-dot"></span><span id="running-text">Running</span></div>
-          <label class="check-row" for="sound-toggle">
-            <input type="checkbox" id="sound-toggle" data-testid="sound-toggle" checked />
-            <span>Sound on each result</span>
-          </label>
           <div class="result-flash" id="result-flash" data-testid="result-flash" hidden></div>
         </section>
 
         <section class="card metrics-card" data-testid="session-metrics-card">
-          <div class="card-kicker">Open / last contract (virtual)</div>
-          <div class="last-trade" id="last-trade" data-testid="last-trade">No contract yet.</div>
-
-          <div class="card-kicker sub">Session total (virtual)</div>
+          <div class="card-kicker">Session · virtual</div>
           <div class="metric-grid">
             <div class="tile"><span class="tile-label">Wins</span><span class="tile-value win" id="stat-wins" data-testid="stat-wins">0</span></div>
             <div class="tile"><span class="tile-label">Losses</span><span class="tile-value loss" id="stat-losses" data-testid="stat-losses">0</span></div>
@@ -231,22 +190,23 @@
           </div>
           <div class="metric-sub muted">
             <span id="stat-trades" data-testid="stat-trades">0 trades</span><span>·</span>
-            <span id="stat-avg" data-testid="stat-avg">avg win — / avg loss —</span><span>·</span>
             <span id="stat-dd" data-testid="stat-drawdown">max drawdown $0.00</span>
           </div>
+          <div class="card-kicker sub">Current contract</div>
+          <div class="last-trade" id="last-trade" data-testid="last-trade">No contract yet.</div>
           <div class="sr-only" aria-live="polite" id="result-announcer" data-testid="result-announcer"></div>
         </section>
       </div>
 
       <div class="grid-bottom">
         <section class="card history-card" data-testid="trade-history-card">
-          <div class="card-kicker">Virtual trade history <span class="muted" id="history-count" data-testid="history-count"></span></div>
+          <div class="card-kicker">Trade history <span class="muted" id="history-count" data-testid="history-count"></span></div>
           <div class="table-wrap history-scroll" data-testid="history-scroll">
             <table class="table" data-testid="trade-history-table">
-              <thead><tr><th>#</th><th>Time</th><th>Market</th><th>Contract</th><th>Detail</th><th>Stake</th><th>P/L</th><th>Session</th><th>Result</th></tr></thead>
+              <thead><tr><th>#</th><th>Time</th><th>Contract</th><th>Stake</th><th>P/L</th><th>Result</th></tr></thead>
               <tbody id="trade-history-body" data-testid="trade-history-body"></tbody>
             </table>
-            <p class="empty muted" id="trade-history-empty" data-testid="trade-history-empty">No virtual contracts yet — choose a strategy and press Start.</p>
+            <p class="empty muted" id="trade-history-empty" data-testid="trade-history-empty">No trades yet — press Start.</p>
           </div>
         </section>
 
@@ -256,50 +216,24 @@
         </section>
       </div>
 
-      <!-- ============ RESEARCH LAB (backtest) ============ -->
-      <section class="card lab-card" data-testid="lab-card">
-        <div class="ai-head">
-          <div>
-            <div class="card-kicker">Strategy comparison · last 1,000 real ticks</div>
-            <p class="hint ai-sub">Replays recent Deriv ticks through each strategy with your stake and settings. Auto-digit is tested walk-forward: each pick uses only ticks before the contract (out-of-sample). Past results do not predict future ones.</p>
-          </div>
+      <!-- ============ OPTIONAL: STRATEGY COMPARISON ============ -->
+      <details class="card lab-card" id="lab-card" data-testid="lab-card">
+        <summary class="lab-summary" data-testid="lab-toggle">Strategy comparison <span class="muted">(optional · last 1,000 ticks)</span></summary>
+        <div class="lab-body-wrap">
+          <p class="hint">Replays recent ticks with your stake. Auto-digit uses only past ticks (out-of-sample). Past results don't predict future ones.</p>
           <button class="btn btn-primary" id="lab-run-btn" data-testid="lab-run-btn" type="button">Run comparison</button>
-        </div>
-        <div class="table-wrap" id="lab-output" data-testid="lab-output" hidden>
-          <table class="table" data-testid="lab-table">
-            <thead><tr><th>Strategy</th><th>Contracts</th><th>Win rate</th><th>Avg win</th><th>Avg loss</th><th>Net P/L</th><th>Max drawdown</th></tr></thead>
-            <tbody id="lab-body"></tbody>
-          </table>
-          <p class="hint" id="lab-note" data-testid="lab-note"></p>
-        </div>
-      </section>
-
-      <!-- ============ AI COACH (owner only, optional) ============ -->
-      <section class="card ai-card" data-testid="ai-card" id="ai-card" hidden>
-        <div class="ai-head">
-          <div>
-            <div class="card-kicker">AI coach · owner only</div>
-            <p class="hint ai-sub">Reads your virtual session and gives advice. Runs only when you press a button.</p>
+          <div class="table-wrap" id="lab-output" data-testid="lab-output" hidden>
+            <table class="table" data-testid="lab-table">
+              <thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Net P/L</th><th>Max drawdown</th></tr></thead>
+              <tbody id="lab-body"></tbody>
+            </table>
+            <p class="hint" id="lab-note" data-testid="lab-note"></p>
           </div>
-          <button class="btn btn-primary" id="ai-coach-btn" data-testid="ai-coach-btn" type="button">Analyze my session</button>
         </div>
-        <div class="ai-coach-out" id="ai-coach-output" data-testid="ai-coach-output" aria-live="polite" hidden></div>
-        <div class="ai-chat" data-testid="ai-chat">
-          <div class="ai-messages" id="ai-messages" data-testid="ai-messages">
-            <p class="empty muted" id="ai-empty" data-testid="ai-empty">Ask anything about the strategies or your session.</p>
-          </div>
-          <form class="ai-form" id="ai-form" data-testid="ai-form" novalidate>
-            <input class="input" id="ai-input" data-testid="ai-input" type="text" maxlength="2000" autocomplete="off" placeholder="Ask the AI coach…" />
-            <button class="btn btn-primary" id="ai-send-btn" data-testid="ai-send-btn" type="submit">Send</button>
-            <button class="btn btn-ghost" id="ai-clear-btn" data-testid="ai-clear-btn" type="button">Clear</button>
-          </form>
-        </div>
-      </section>
+      </details>
 
       <footer class="disclaimer" data-testid="disclaimer">
-        Research simulation uses real Deriv market data with virtual money and never places Deriv contracts. Virtual results are
-        not account profits or losses. Simulated Accumulator and Multiplier outcomes are close approximations of Deriv's rules.
-        No strategy can predict the next tick; every contract type carries a house edge. Not financial advice.
+        Virtual-money simulation on live Deriv data. No real trades are placed. Not financial advice.
       </footer>
     </main>
 
@@ -319,7 +253,7 @@
           <input class="input" id="token-input" data-testid="token-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Deriv API token" />
           <p class="hint">
             Create one at <a data-testid="token-help-link" href="https://developers.deriv.com/dashboard/" target="_blank" rel="noopener noreferrer">developers.deriv.com → API tokens</a>
-            with <strong>Trade</strong> scope (add <strong>Account management</strong> to unlock the owner AI coach). Stored only in this browser tab.
+            with <strong>Read</strong> (or Trade) scope. Stored only in this browser tab.
           </p>
           <p class="form-error" id="connect-error" data-testid="connect-error" hidden></p>
           <div class="dialog-actions">

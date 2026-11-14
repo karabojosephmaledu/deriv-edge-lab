@@ -1,10 +1,10 @@
 services:
-  # FastAPI backend (Deriv OAuth token exchange, owner check, optional AI coach)
+  # FastAPI backend (Deriv config + OAuth token exchange)
   - type: web
     name: deriv-edge-lab-api
     runtime: python
     rootDir: backend
-    buildCommand: pip install -r requirements.txt --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
+    buildCommand: pip install -r requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/deriv/config
     envVars:
@@ -15,10 +15,6 @@ services:
       - key: CORS_ORIGINS
         sync: false
       - key: DERIV_APP_ID
-        sync: false
-      - key: OWNER_NICKNAME
-        sync: false
-      - key: EMERGENT_LLM_KEY
         sync: false
 
   # Static frontend (plain HTML/CSS/JS). /api/* is proxied to the backend so
