@@ -924,3 +924,8 @@ button { font-family: inherit; }
 .table td.transaction-description { white-space: normal; min-width: 170px; max-width: 320px; overflow-wrap: anywhere; }
 #matches-research[open], #saved-research[open] { display: grid; gap: 12px; }
 #saved-research .table-wrap { max-width: 100%; }
+
+/* Restore the original compact virtual-testing controls without a wallet card. */
+#matches-testing .research-fields .select { width: 100%; min-width: 0; margin-top: 8px; }
+#matches-testing .metric-grid { margin-top: 16px; }
+.matches-history { max-height: 240px; margin-top: 12px; }

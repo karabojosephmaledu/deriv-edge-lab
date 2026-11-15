@@ -10,7 +10,7 @@ An account-centered dashboard for Deriv Options accounts, with live public marke
 
 ## Current account-centered website
 
-The deployed page focuses on genuine authorized Demo/Real account balances and read-only provider activity. Digit Matches is the only visible research category; it never starts orders. The large virtual wallet and other strategy controls are removed from the current interface. Original execution/simulation source remains preserved separately and is not activated by this page. See [the account-experience investigation](research/ACCOUNT-EXPERIENCE.md) for the confirmed cause, source-preservation boundary, supported data and limitations.
+The deployed page retains genuine authorized Demo/Real account balances and read-only provider activity. A compact Digit Matches virtual-testing card restores Start/Pause/Stop, Fixed-Stake and Video Growth presets, session limits and separate virtual results. It never starts account orders. The large virtual wallet and other contract-strategy controls remain removed. Original execution/simulation source remains preserved separately and is not activated by this page. See [the account-experience investigation](research/ACCOUNT-EXPERIENCE.md) for the confirmed cause, source-preservation boundary, supported data and limitations.
 
 ## Structure
 
@@ -186,3 +186,5 @@ See [the before/after report and all-strategy comparison](research/REBUILD-V2.md
 ## Website restoration release
 
 See [the restoration report](research/WEBSITE-RESTORATION.md) for restored sounds, authorized account display, persistent separate virtual wallets, six educational categories, verification and limitations. Historical PR #7 results remain in [the fixed-protocol report](research/REBUILD-V2.md). The Render build still uses the existing static files and Python backend; no new service or dependency is required.
+
+See [Matches virtual preset rules and verification](research/MATCHES-VIRTUAL-PRESETS.md) for entry/settlement timing, public payout assumptions, exact growth stages, controls and limitations.
