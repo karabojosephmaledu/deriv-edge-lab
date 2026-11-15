@@ -95,6 +95,8 @@ const state = {
   freqQueue: [],
   prices: [], // recent prices (for entry filters)
   lastPip: 2,
+  lastTick: null,
+  tickSubscriptionGen: 0,
   digitPayouts: new Array(10).fill(null),
   payoutReqs: new Map(),
   payoutGen: 0,
@@ -108,7 +110,7 @@ const state = {
 };
 
 function freshStats() {
-  return { trades: 0, wins: 0, losses: 0, net: 0, sumWin: 0, sumLoss: 0, peak: 0, maxDD: 0 };
+  return { trades: 0, wins: 0, losses: 0, breakEven: 0, unresolved: 0, net: 0, sumWin: 0, sumLoss: 0, peak: 0, maxDD: 0 };
 }
 state.stats = freshStats();
 
@@ -284,6 +286,7 @@ function setStatus(status) {
     status === "live" ? "Live · " + state.settings.symbol
       : status === "demo" ? "Demo feed · " + state.settings.symbol
         : status === "reconnecting" ? "Reconnecting…" : "Connecting…";
+  renderControls();
 }
 
 function connectPublic() {
@@ -305,6 +308,8 @@ function connectPublic() {
         else if (msg.msg_type === "proposal" && msg.proposal && state.payoutReqs.has(msg.req_id)) applyDigitProposal(msg.req_id, msg.proposal);
       },
       onClose: () => {
+        interruptSimulation("Live feed disconnected; the contract's outcome cannot be verified.");
+        resetFeedState();
         state.feedAttempts += 1;
         if (state.feedAttempts >= 3 || state.demoFeed) {
           if (!state.demoFeed) startDemoTimer(state.settings.symbol, true);
@@ -323,17 +328,24 @@ function resetFeedState() {
   state.freq = new Array(10).fill(0);
   state.freqQueue = [];
   state.prices = [];
+  state.lastTick = null;
   renderTrail();
   renderFreq();
   renderQuote(null);
 }
 
 async function subscribeTicks(symbol) {
-  voidOpenPosition("market changed");
+  if (state.pos) {
+    toast("Wait for the open virtual contract to finish before changing markets.", "info");
+    return;
+  }
   if (state.demoFeed) return startDemoTimer(symbol, false);
   if (!state.pub || !state.pub.isOpen()) return;
-  await state.pub.request({ forget_all: "ticks" }, 10000).catch(() => {});
+  const gen = ++state.tickSubscriptionGen;
   resetFeedState();
+  renderControls();
+  await state.pub.request({ forget_all: "ticks" }, 10000).catch(() => {});
+  if (gen !== state.tickSubscriptionGen || symbol !== state.settings.symbol || !state.pub.isOpen()) return;
   setStatus("live");
   try {
     await state.pub.request({ ticks: symbol, subscribe: 1 });
@@ -344,6 +356,7 @@ async function subscribeTicks(symbol) {
 
 /* Labelled synthetic feed — ONLY when Deriv's public gateway is unreachable. */
 function startDemoTimer(symbol, announce) {
+  interruptSimulation("Synthetic display feed started; research requires verified live ticks.");
   stopDemoTimer();
   state.demoFeed = true;
   resetFeedState();
@@ -352,7 +365,7 @@ function startDemoTimer(symbol, announce) {
   let price = 572.26;
   state.demoTimer = setInterval(() => {
     price *= 1 + (Math.random() - 0.5) * 0.0016;
-    onTick({ quote: price, pip_size: 2, epoch: Math.floor(Date.now() / 1000), symbol });
+    onTick({ quote: price, pip_size: 2, epoch: Math.floor(Date.now() / 1000), symbol }, true);
   }, symbol.startsWith("1HZ") ? 1000 : 2000);
 }
 
@@ -541,35 +554,64 @@ function currentCfg() {
   return cfg;
 }
 
-function onTick(tick) {
-  const pip = Number.isFinite(Number(tick.pip_size)) ? Number(tick.pip_size) : 2;
-  state.lastPip = pip;
+function liveSimulationReady() {
+  return !state.demoFeed && state.status === "live" && !!state.lastTick && state.lastTick.symbol === state.settings.symbol;
+}
+
+function onTick(tick, synthetic = false) {
+  if (!tick || tick.symbol !== state.settings.symbol) return;
+  // Number() also coerces booleans, arrays and blank strings; those are not market data.
+  if (![tick.quote, tick.pip_size, tick.epoch].every((v) =>
+    typeof v === "number" || (typeof v === "string" && v.trim() !== ""))) return;
+  const pip = Number(tick.pip_size);
   const price = Number(tick.quote);
+  const epoch = Number(tick.epoch);
+  if (tick.pip_size == null || !Number.isInteger(pip) || pip < 0 || pip > 20 ||
+      !Number.isFinite(price) || price <= 0 || !Number.isInteger(epoch) || epoch <= 0) return;
+  if (synthetic ? !state.demoFeed : state.demoFeed || state.status !== "live") return;
+  if (!synthetic && state.lastTick) {
+    if (epoch <= state.lastTick.epoch) return; // duplicate or delayed/out-of-order tick
+    const interval = tick.symbol.startsWith("1HZ") ? 1 : 2;
+    if (epoch - state.lastTick.epoch > interval) {
+      interruptSimulation("Missing live ticks; the contract's outcome cannot be verified.");
+      resetFeedState();
+    }
+  }
   const quoteStr = price.toFixed(pip);
   const digit = Number(quoteStr.charAt(quoteStr.length - 1));
-  state.trail.unshift({ quoteStr, digit, epoch: tick.epoch });
+  state.trail.unshift({ quoteStr, digit, epoch });
   if (state.trail.length > TICK_TRAIL) state.trail.pop();
+  renderQuote({ quoteStr, digit, epoch });
+  renderTrail();
+  // The fallback remains a labelled display only, never research observations or settlements.
+  if (synthetic) return;
+  state.lastPip = pip;
+  state.lastTick = { symbol: tick.symbol, epoch };
   state.freq[digit] += 1;
   state.freqQueue.push(digit);
   if (state.freqQueue.length > FREQ_WINDOW) state.freq[state.freqQueue.shift()] -= 1;
   state.prices.push(price);
   if (state.prices.length > 200) state.prices.shift();
-  renderQuote({ quoteStr, digit, epoch: tick.epoch });
-  renderTrail();
   renderFreq();
   renderDigitExplain();
-  if (tick.symbol && tick.symbol !== state.settings.symbol) return;
   simulateTick(price, digit);
+  renderControls();
 }
 
 function simulateTick(price, digit) {
+  if (!liveSimulationReady()) return;
   if (state.pos) {
     const res = stepContract(state.pos, price, digit);
     if (res) settle(res);
-    else renderLastTrade();
+    else {
+      markDrawdown(state.stats, openPnl(state.pos));
+      renderStats();
+      renderLastTrade();
+    }
     return; // never open a new contract on the tick that settled one
   }
   if (state.session !== "running") return;
+  if (checkSessionLimits()) return;
   const cfg = currentCfg();
   const { maxLoss } = state.settings;
   if (maxLoss != null && state.stats.net - cfg.stake < -maxLoss - 1e-9) {
@@ -584,37 +626,63 @@ function simulateTick(price, digit) {
     renderStrategy();
   }
   state.pos = openContract(cfg, price);
+  state.pos.symbol = state.settings.symbol;
   state.pos.openedAt = new Date();
+  markDrawdown(state.stats, openPnl(state.pos));
+  renderStats();
   renderLastTrade();
+  renderControls();
+}
+
+// Statistics only: these helpers do not change the contract pricing/settlement formulas.
+function openPnl(pos) {
+  const pnl = pos.product === "mult" && pos.ticks === 0 ? -pos.commission : pos.value - pos.stake;
+  return Math.round(Math.max(-pos.stake, pnl) * 100) / 100;
+}
+
+function markDrawdown(st, unrealized = 0) {
+  const equity = Math.round((st.net + unrealized) * 100) / 100;
+  st.peak = Math.max(st.peak, equity);
+  st.maxDD = Math.max(st.maxDD, Math.round((st.peak - equity) * 100) / 100);
+}
+
+function recordSettlement(st, res) {
+  st.trades += 1;
+  if (res.pnl > 0) {
+    st.wins += 1;
+    st.sumWin += res.pnl;
+  } else if (res.pnl < 0) {
+    st.losses += 1;
+    st.sumLoss += res.pnl;
+  } else st.breakEven += 1;
+  st.net = Math.round((st.net + res.pnl) * 100) / 100;
+  markDrawdown(st);
+}
+
+function appendHistory(pos, res) {
+  state.history.unshift({
+    n: ++state.seq, time: new Date(), symbol: pos.symbol, product: pos.product,
+    label: contractLabel(pos), detail: res.detail, stake: pos.stake, pnl: res.pnl, win: res.win,
+    outcome: res.outcome, cum: state.stats.net, digit: pos.digit,
+  });
+  if (state.history.length > HISTORY_LIMIT) state.history.pop();
+  state.lastResult = { pos, res };
 }
 
 function settle(res) {
   const pos = state.pos;
+  if (!pos) return;
   state.pos = null;
-  const st = state.stats;
-  st.trades += 1;
-  if (res.win) {
-    st.wins += 1;
-    st.sumWin += res.pnl;
-  } else {
-    st.losses += 1;
-    st.sumLoss += res.pnl;
-  }
-  st.net = Math.round((st.net + res.pnl) * 100) / 100;
-  st.peak = Math.max(st.peak, st.net);
-  st.maxDD = Math.max(st.maxDD, Math.round((st.peak - st.net) * 100) / 100);
-  state.history.unshift({
-    n: ++state.seq, time: new Date(), symbol: state.settings.symbol, product: pos.product,
-    label: contractLabel(pos), detail: res.detail, stake: pos.stake, pnl: res.pnl, win: res.win, cum: st.net, digit: pos.digit,
-  });
-  if (state.history.length > HISTORY_LIMIT) state.history.pop();
-  state.lastResult = { pos, res };
+  res = { ...res, win: res.pnl > 0, outcome: res.pnl > 0 ? "win" : res.pnl < 0 ? "loss" : "break-even" };
+  recordSettlement(state.stats, res);
+  appendHistory(pos, res);
   renderStats();
   renderHistory();
   renderLastTrade();
   showResultFlash(res.win, pos.stake, res.pnl);
-  playResultSound(res.win);
+  if (res.pnl !== 0) playResultSound(res.win);
   checkSessionLimits();
+  renderControls();
 }
 
 function contractLabel(pos) {
@@ -630,23 +698,43 @@ function checkSessionLimits() {
   if (target != null && st.net >= target) why = "Profit target reached (" + fmtSigned(st.net) + ")";
   else if (maxLoss != null && st.net <= -maxLoss) why = "Total loss limit reached (" + fmtSigned(st.net) + ")";
   else if (maxTrades != null && st.trades >= maxTrades) why = "Max trades reached (" + st.trades + ")";
-  if (why && state.session === "running") {
+  if (why && (state.session === "running" || state.session === "paused")) {
     state.session = "done";
     renderControls();
     toast(why + " — session stopped.", why.startsWith("Profit") ? "success" : "info");
   }
+  return !!why;
 }
 
-function voidOpenPosition(reason) {
-  if (!state.pos) return;
-  state.pos = null;
+function interruptSimulation(reason) {
+  if (!state.pos && state.session !== "running" && state.session !== "paused") return;
+  if (state.pos) {
+    const pos = state.pos;
+    state.pos = null;
+    state.stats.unresolved += 1;
+    // No invented win, loss, refund, or P/L for a contract with missing observations.
+    appendHistory(pos, { outcome: "unresolved", win: false, pnl: null, detail: reason });
+    renderStats();
+    renderHistory();
+  }
+  state.session = "done";
   renderLastTrade();
-  toast("Open virtual contract cancelled (" + reason + ") — not counted.", "info");
+  renderControls();
+  toast(reason + " Session stopped; any unresolved result is shown in history.", "error");
 }
 
 function startSession() {
   unlockAudio();
   if (state.session === "running") return;
+  if (state.pos && state.session !== "paused") {
+    toast("The previous session's open contract must finish before starting a new session.", "info");
+    return;
+  }
+  if (state.session === "paused" && checkSessionLimits()) return;
+  if (!liveSimulationReady()) {
+    toast("Wait for verified live Deriv ticks before starting research. The synthetic feed is display only.", "info");
+    return;
+  }
   if (state.session === "idle" || state.session === "done") {
     state.stats = freshStats();
     state.history = [];
@@ -690,18 +778,8 @@ function runBacktest(prices, pip, product, cfgBase, opts) {
       const res = stepContract(pos, prices[i], digits[i]);
       if (res) {
         pos = null;
-        st.trades += 1;
-        if (res.win) {
-          st.wins += 1;
-          st.sumWin += res.pnl;
-        } else {
-          st.losses += 1;
-          st.sumLoss += res.pnl;
-        }
-        st.net = Math.round((st.net + res.pnl) * 100) / 100;
-        st.peak = Math.max(st.peak, st.net);
-        st.maxDD = Math.max(st.maxDD, st.peak - st.net);
-      }
+        recordSettlement(st, res);
+      } else markDrawdown(st, openPnl(pos));
       continue;
     }
     const cfg = { ...cfgBase };
@@ -712,7 +790,9 @@ function runBacktest(prices, pip, product, cfgBase, opts) {
     }
     if (opts.filter && !entryAllowed(product, prices.slice(Math.max(0, i - 30), i + 1), [digits[i]], cfg)) continue;
     pos = openContract(cfg, prices[i]);
+    markDrawdown(st, openPnl(pos));
   }
+  if (pos) st.unresolved += 1;
   return st;
 }
 
@@ -748,7 +828,8 @@ async function runComparison() {
     for (const [name, st] of rows) {
       const tr = document.createElement("tr");
       const cells = [
-        name, String(st.trades), st.trades ? ((st.wins / st.trades) * 100).toFixed(1) + "%" : "—", fmtSigned(st.net), money(st.maxDD),
+        name, st.trades + (st.unresolved ? " · " + st.unresolved + " unresolved" : ""),
+        st.trades ? ((st.wins / st.trades) * 100).toFixed(1) + "%" : "—", fmtSigned(st.net), money(st.maxDD),
       ];
       cells.forEach((c, i) => {
         const td = document.createElement("td");
@@ -760,7 +841,7 @@ async function runComparison() {
     }
     const be = (1 / differsMultiplier(s.digit).m) * 100;
     $("lab-note").textContent =
-      (prices.length - FREQ_WINDOW) + " ticks of " + s.symbol + ". Differs break-even: " + be.toFixed(1) + "% wins. Small differences are usually chance.";
+      (prices.length - FREQ_WINDOW) + " ticks of " + s.symbol + ". Differs break-even: " + be.toFixed(1) + "% wins. Small differences are usually chance. P/L is settled only; unresolved end positions have unknown final results. Drawdown includes observed open P/L; zero-profit settlements are break-even.";
     $("lab-output").hidden = false;
   } catch (err) {
     toast("Comparison failed: " + errText(err), "error");
@@ -1142,12 +1223,13 @@ function renderDigitExplain() {
 
 function renderControls() {
   const ss = state.session;
-  $("start-btn").disabled = ss === "running";
+  $("start-btn").disabled = ss === "running" || !liveSimulationReady() || (ss !== "paused" && !!state.pos);
   $("start-btn").textContent = ss === "paused" ? "Resume" : ss === "done" ? "New session" : "Start";
   $("pause-btn").disabled = ss !== "running";
   $("stop-btn").disabled = ss === "idle" || ss === "done";
   $("running-indicator").hidden = ss !== "running" && ss !== "paused";
   $("running-text").textContent = ss === "paused" ? "Paused" : "Running · virtual";
+  $("symbol-select").disabled = !!state.pos;
 }
 
 function renderQuote(entry) {
@@ -1205,10 +1287,10 @@ function renderLastTrade() {
   const el = $("last-trade");
   if (state.pos) {
     const p = state.pos;
-    const pnl = Math.round((p.value - p.stake) * 100) / 100;
+    const pnl = openPnl(p);
     el.className = "last-trade open";
     el.textContent = "OPEN · " + contractLabel(p) + " · stake " + money(p.stake) +
-      (p.product === "differs" ? " · settles next tick" : " · tick " + p.ticks + " · value " + money(p.value) + " (" + fmtSigned(pnl) + ")");
+      (p.product === "differs" ? " · settles next tick" : " · tick " + p.ticks + " · value " + money(p.stake + pnl) + " (" + fmtSigned(pnl) + ")");
     return;
   }
   const lr = state.lastResult;
@@ -1217,21 +1299,25 @@ function renderLastTrade() {
     el.textContent = "No contract yet.";
     return;
   }
-  el.className = "last-trade " + (lr.res.win ? "win" : "loss");
-  el.textContent = (lr.res.win ? "WIN " : "LOSS ") + fmtSigned(lr.res.pnl) + " · " + contractLabel(lr.pos) + " · stake " + money(lr.pos.stake) + " · " + lr.res.detail;
+  const outcome = lr.res.outcome;
+  el.className = "last-trade " + (outcome === "win" ? "win" : outcome === "loss" ? "loss" : "");
+  el.textContent = (outcome === "unresolved" ? "UNRESOLVED · P/L unknown" : outcome === "break-even" ? "BREAK-EVEN " + money(0) : (lr.res.win ? "WIN " : "LOSS ") + fmtSigned(lr.res.pnl)) +
+    " · " + contractLabel(lr.pos) + " · stake " + money(lr.pos.stake) + " · " + lr.res.detail;
 }
 
 function renderStats() {
   const st = state.stats;
   $("stat-wins").textContent = String(st.wins);
   $("stat-losses").textContent = String(st.losses);
-  $("stat-win-rate").textContent = st.trades ? ((st.wins / st.trades) * 100).toFixed(1) + "%" : "—";
+  $("stat-win-rate").textContent = (st.trades ? ((st.wins / st.trades) * 100).toFixed(1) + "%" : "—") + (st.unresolved ? "*" : "");
+  $("stat-win-rate").title = "Wins / settled trades, including break-even trades. Unresolved trades are excluded; * means incomplete results.";
   const pnlEl = $("stat-pnl");
   pnlEl.textContent = st.net === 0 ? money(0) : fmtSigned(st.net);
   pnlEl.classList.toggle("win", st.net > 0);
   pnlEl.classList.toggle("loss", st.net < 0);
-  $("stat-trades").textContent = st.trades + (st.trades === 1 ? " trade" : " trades");
-  $("stat-dd").textContent = "max drawdown " + money(st.maxDD);
+  $("stat-trades").textContent = st.trades + (st.trades === 1 ? " settled trade" : " settled trades") +
+    (st.breakEven ? " · " + st.breakEven + " break-even" : "") + (st.unresolved ? " · " + st.unresolved + " unresolved (P/L incomplete)" : "");
+  $("stat-dd").textContent = "max equity drawdown " + money(st.maxDD);
 }
 
 function renderHistory() {
@@ -1247,11 +1333,12 @@ function renderHistory() {
       tr.appendChild(td);
     });
     const pl = document.createElement("td");
-    pl.textContent = fmtSigned(t.pnl);
-    pl.className = t.pnl >= 0 ? "pl-pos" : "pl-neg";
+    pl.textContent = t.outcome === "unresolved" ? "Unknown" : fmtSigned(t.pnl);
+    pl.className = t.pnl > 0 ? "pl-pos" : t.pnl < 0 ? "pl-neg" : "";
     const res = document.createElement("td");
-    res.innerHTML = '<span class="badge ' + (t.win ? "badge-win" : "badge-loss") + '">' + (t.win ? "Win" : "Loss") + "</span>";
-    tr.title = t.symbol + " · " + t.detail + " · session " + fmtSigned(t.cum);
+    const label = t.outcome === "unresolved" ? "Unresolved" : t.outcome === "break-even" ? "Break-even" : t.win ? "Win" : "Loss";
+    res.innerHTML = '<span class="badge ' + (t.outcome === "win" ? "badge-win" : t.outcome === "loss" ? "badge-loss" : "badge-sim") + '">' + label + "</span>";
+    tr.title = t.symbol + " · " + t.detail + " · settled session P/L " + fmtSigned(t.cum);
     tr.append(pl, res);
     body.appendChild(tr);
   }
@@ -1261,12 +1348,13 @@ let flashTimer = null;
 function showResultFlash(win, stake, pnl) {
   const el = $("result-flash");
   const ratio = (stake + pnl) / stake;
-  el.className = "result-flash " + (win ? "win" : "loss") + (win && ratio >= 3 ? " big" : "");
-  el.innerHTML = '<span class="rf-mult">×' + Math.max(0, ratio).toFixed(2) + '</span><span class="rf-txt">' + (win ? "WIN " : "LOSS ") + fmtSigned(pnl) + " (virtual)</span>";
+  const label = pnl === 0 ? "BREAK-EVEN " : win ? "WIN " : "LOSS ";
+  el.className = "result-flash " + (pnl === 0 ? "" : win ? "win" : "loss") + (win && ratio >= 3 ? " big" : "");
+  el.innerHTML = '<span class="rf-mult">×' + Math.max(0, ratio).toFixed(2) + '</span><span class="rf-txt">' + label + fmtSigned(pnl) + " (virtual)</span>";
   el.hidden = false;
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => (el.hidden = true), 1200);
-  $("result-announcer").textContent = (win ? "Win " : "Loss ") + fmtSigned(pnl);
+  $("result-announcer").textContent = label + fmtSigned(pnl);
 }
 
 /* ------------------------------ sound alerts ----------------------------- */
@@ -1337,12 +1425,18 @@ function toast(message, kind) {
 /* --------------------------------- events -------------------------------- */
 
 function changeSetting(patch, requote) {
+  if (patch.symbol && patch.symbol !== state.settings.symbol && state.pos) {
+    $("symbol-select").value = state.settings.symbol;
+    toast("Wait for the open virtual contract to finish before changing markets.", "info");
+    return;
+  }
   Object.assign(state.settings, patch);
   clampStakeToProduct();
   saveSettings();
   renderStrategy();
   renderTrail();
   renderFreq();
+  checkSessionLimits();
   if (requote) refreshQuotes();
 }
 
