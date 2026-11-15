@@ -26,7 +26,7 @@ before(async()=>{
    if(url.pathname==='/api/deriv/account-display')return send(200,view(url.searchParams.get('account_id')||'DOT-test'));
    return send(403,{detail:'Orders forbidden in account display tests'});
   }
-  const files={'/':'index.html','/account.js':'public/account.js','/styles.css':'public/styles.css','/favicon.svg':'public/favicon.svg','/research-evidence.json':'public/research-evidence.json'};
+  const files={'/':'index.html','/account.js':'public/account.js','/matches-simulator.js':'public/matches-simulator.js','/matches-lab.js':'public/matches-lab.js','/styles.css':'public/styles.css','/favicon.svg':'public/favicon.svg','/research-evidence.json':'public/research-evidence.json'};
   if(!files[url.pathname]){res.writeHead(404).end();return;}
   res.setHeader('Content-Type',url.pathname.endsWith('.js')?'text/javascript':url.pathname.endsWith('.css')?'text/css':url.pathname.endsWith('.json')?'application/json':'text/html');res.end(fs.readFileSync(path.join(root,files[url.pathname])));
  });
@@ -45,7 +45,7 @@ async function open(t,{mobile=false,login=true,oauth=false}={}){
   window.__requests=[];window.__epoch=1000;window.WebSocket=class{
    static OPEN=1;
    constructor(url){if(!url.endsWith('/ws/public'))throw new Error('Authenticated socket forbidden in browser');this.readyState=0;window.__socket=this;queueMicrotask(()=>{this.readyState=1;this.onopen?.();});}
-   send(raw){const q=JSON.parse(raw);window.__requests.push(q);if(!('ticks'in q||'forget_all'in q||'ping'in q))throw new Error('Non-market command forbidden');setTimeout(()=>this.onmessage?.({data:JSON.stringify({req_id:q.req_id})}),0);}
+   send(raw){const q=JSON.parse(raw);window.__requests.push(q);if(!('ticks'in q||'forget_all'in q||'ping'in q||q.proposal===1&&q.contract_type==='DIGITMATCH'))throw new Error('Non-market command forbidden');const message=q.proposal?(window.__quoteInvalid?{error:{code:'MockUnavailable'}}:{proposal:{id:'public-quote-'+q.req_id,ask_price:q.amount,payout:Math.round(q.amount*8.33*100)/100},echo_req:q}):{};setTimeout(()=>this.onmessage?.({data:JSON.stringify({...message,req_id:q.req_id})}),0);}
    close(){this.readyState=3;this.onclose?.();}
   };
   window.__tick=(quote=100.01)=>{window.__epoch+=2;window.__socket.onmessage({data:JSON.stringify({msg_type:'tick',tick:{symbol:document.getElementById('symbol-select').value,quote,pip_size:2,epoch:window.__epoch}})});};
@@ -177,4 +177,94 @@ test('account dashboard: disconnect invalidates in-flight status and blocks poll
  await page.evaluate(()=>window.__lateLogout());
  assert.equal(await page.evaluate(()=>state.view),null);
  assert.equal(await page.locator('#account-live').isVisible(),false);
+});
+
+async function quoted(page){await page.waitForFunction(()=>!!window.matchesLab?.quote);}
+async function virtualOutcome(page,digit=7){await quoted(page);await page.evaluate(()=>window.__tick(100.01));await page.evaluate(d=>window.__tick(100+d/100),digit);}
+
+test('virtual Matches: Start uses live quotes, exact next-tick matches and profit target; actual account untouched',{timeout:15000},async t=>{
+ const page=await open(t);
+ await page.locator('#matches-target').fill('7');await page.locator('#matches-start').click();
+ await quoted(page);await page.evaluate(()=>window.__tick(100.01));
+ assert.equal(await page.locator('#matches-wins').innerText(),'0');
+ await page.evaluate(()=>window.__tick(100.07));
+ assert.equal(await page.locator('#matches-wins').innerText(),'1');assert.equal(await page.locator('#matches-pnl').innerText(),'+$7.33');
+ assert.match(await page.locator('#matches-status').innerText(),/profit target reached/);
+ assert.match(await page.locator('#balance-value').innerText(),/10,000\.00/);assert.equal(await page.locator('#stat-pnl').innerText(),'+$0.00');
+ assert.equal(model.calls.some(c=>c.path.includes('/demo/')),false);
+ assert.deepEqual(await page.evaluate(()=>window.__notes.slice(-2)),[880,1318.5]);
+});
+
+test('virtual Matches: a pending loss while paused obeys total loss limit and cannot Resume',{timeout:15000},async t=>{
+ const page=await open(t);await page.locator('#matches-loss').fill('1');await page.locator('#matches-start').click();await quoted(page);
+ await page.evaluate(()=>window.__tick());await page.locator('#matches-pause').click();await page.evaluate(()=>window.__tick());
+ assert.equal(await page.locator('#matches-losses').innerText(),'1');assert.equal(await page.locator('#matches-pnl').innerText(),'−$1.00');
+ assert.equal(await page.locator('#matches-start').innerText(),'New session');assert.match(await page.locator('#matches-status').innerText(),/loss limit reached/);
+ assert.deepEqual(await page.evaluate(()=>window.__notes.slice(-2)),[220,164.8]);
+ await page.locator('#matches-start').click();assert.equal(await page.locator('#matches-history tr').count(),0);
+});
+
+test('virtual Matches: Stop locks restart until pending settlement; paused quote requests never open positions',{timeout:15000},async t=>{
+ const page=await open(t);await page.locator('#matches-start').click();await quoted(page);await page.evaluate(()=>window.__tick());
+ await page.locator('#matches-stop').click();assert.equal(await page.locator('#matches-start').isDisabled(),true);
+ await page.evaluate(()=>window.__tick());assert.equal(await page.locator('#matches-losses').innerText(),'1');
+ await page.locator('#matches-start').click();await page.locator('#matches-pause').click();await page.evaluate(()=>window.__tick());
+ assert.equal(await page.evaluate(()=>matchesLab.engine.pending),null);assert.equal(await page.locator('#matches-losses').innerText(),'0');
+ assert.equal(await page.locator('#matches-start').innerText(),'Resume');
+});
+
+test('Video Growth: the $47 experiment steps from $1 to $2 at $100 and never raises stake after a loss',{timeout:20000},async t=>{
+ const page=await open(t);await page.locator('#matches-preset').selectOption('growth');
+ assert.match(await page.locator('#matches-stage').innerText(),/Stage 1\/4.*47\.00.*1\.00/);assert.equal(await page.locator('#matches-stake').isDisabled(),true);
+ await page.locator('#matches-start').click();
+ for(let i=0;i<8;i++)await virtualOutcome(page);
+ assert.match(await page.locator('#matches-stage').innerText(),/Stage 2\/4.*105\.64.*2\.00/);
+ await virtualOutcome(page,1);
+ assert.match(await page.locator('#matches-stage').innerText(),/Stage 2\/4.*103\.64.*2\.00/);
+ assert.match(await page.locator('#balance-value').innerText(),/10,000\.00/);
+ assert.equal(await page.evaluate(()=>matchesLab.engine.history[0].ask),200);
+ assert.equal(model.calls.some(c=>c.path.includes('/demo/')),false);
+});
+
+test('virtual Matches: refresh preserves settled results paused and marks an open result unknown once',{timeout:20000},async t=>{
+ const page=await open(t);await page.locator('#matches-start').click();await virtualOutcome(page);await page.locator('#matches-pause').click();
+ await page.reload();await page.waitForFunction(()=>state.feed==='live'||window.__socket?.readyState===1);await page.evaluate(()=>window.__tick());
+ assert.equal(await page.locator('#matches-start').innerText(),'Resume');assert.equal(await page.locator('#matches-pnl').innerText(),'+$7.33');assert.deepEqual(await page.evaluate(()=>window.__notes),[]);
+ await page.locator('#matches-start').click();await quoted(page);await page.evaluate(()=>window.__tick());await page.reload();
+ assert.match(await page.locator('#matches-count').innerText(),/1 unresolved/);assert.equal(await page.locator('#matches-pnl').innerText(),'+$7.33');
+ await page.reload();assert.match(await page.locator('#matches-count').innerText(),/1 unresolved/);assert.equal(await page.locator('#matches-history tr').count(),2);
+});
+
+test('virtual Matches: failed quotes and disconnected ticks produce no fabricated win',{timeout:15000},async t=>{
+ const page=await open(t);await page.evaluate(()=>window.__quoteInvalid=true);await page.locator('#matches-start').click();
+ await page.waitForFunction(()=>matchesLab.engine.status==='done');assert.equal(await page.locator('#matches-wins').innerText(),'0');assert.equal(await page.locator('#matches-history tr').count(),0);
+ await page.evaluate(()=>window.__quoteInvalid=false);await page.locator('#matches-start').click();await quoted(page);await page.evaluate(()=>{window.__tick();window.__socket.close();});
+ assert.match(await page.locator('#matches-count').innerText(),/1 unresolved/);assert.equal(await page.locator('#matches-wins').innerText(),'0');
+});
+
+test('virtual Matches: mobile controls, stage, chart and account switching stay usable without wallet clutter',{timeout:15000},async t=>{
+ const page=await open(t,{mobile:true});await page.locator('#matches-preset').selectOption('growth');
+ for(const id of ['matches-start','matches-pause','matches-stop'])assert.equal(await page.locator('#'+id).isVisible(),true);
+ await page.locator('#account-select').selectOption('ROT-test');await page.waitForFunction(()=>state.view?.selected_account.id==='ROT-test');
+ await page.locator('#matches-start').click();await virtualOutcome(page,1);await page.locator('#matches-stop').click();
+ assert.match(await page.locator('#balance-value').innerText(),/2,500\.00/);assert.equal(await page.locator('#matches-pnl').innerText(),'−$1.00');
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)<=2);
+ assert.equal(await page.locator('#virtual-wallet').count(),0);
+});
+
+test('virtual Matches: refreshing a different market restores that market and paused controls correctly',{timeout:15000},async t=>{
+ const page=await open(t);await page.locator('#symbol-select').selectOption('R_25');
+ await page.evaluate(()=>window.__tick());await page.locator('#matches-start').click();await virtualOutcome(page,1);await page.locator('#matches-pause').click();
+ await page.reload();await page.waitForFunction(()=>window.__requests.some(q=>q.ticks==='R_25'));await page.evaluate(()=>window.__tick());
+ assert.equal(await page.locator('#symbol-select').inputValue(),'R_25');assert.equal(await page.locator('#matches-start').innerText(),'Resume');assert.equal(await page.locator('#symbol-select').isDisabled(),true);
+ await page.locator('#matches-start').click();await virtualOutcome(page,7);assert.equal(await page.locator('#matches-wins').innerText(),'1');assert.equal(await page.locator('#matches-losses').innerText(),'1');
+});
+
+test('virtual Matches: cancelling an in-flight quote cannot leave a Requesting message or open a paused entry',{timeout:15000},async t=>{
+ const page=await open(t);
+ await page.evaluate(()=>{const request=state.pub.request.bind(state.pub);state.pub.request=(q,...args)=>q.proposal?new Promise(resolve=>{window.__delayedQuote=async()=>resolve(await request(q,...args));}):request(q,...args);});
+ await page.locator('#matches-start').click();await page.waitForFunction(()=>typeof window.__delayedQuote==='function');await page.locator('#matches-pause').click();
+ assert.doesNotMatch(await page.locator('#matches-quote').innerText(),/Requesting/);
+ await page.evaluate(()=>window.__delayedQuote());await page.evaluate(()=>window.__tick());
+ assert.equal(await page.evaluate(()=>matchesLab.engine.pending),null);assert.equal(await page.locator('#matches-start').innerText(),'Resume');
 });

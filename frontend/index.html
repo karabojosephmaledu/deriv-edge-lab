@@ -105,6 +105,35 @@
       </section>
 
 
+      <section class="card" id="matches-testing" aria-labelledby="matches-testing-title">
+        <div class="card-kicker" id="matches-testing-title">Digit Matches · live-data virtual testing</div>
+        <div class="research-fields">
+          <label class="field-label">Preset<select class="select" id="matches-preset"><option value="fixed">Fixed-Stake</option><option value="growth">Video Growth Strategy</option></select></label>
+          <label class="field-label">Match digit<select class="select" id="matches-digit" aria-label="Digit to match"></select></label>
+          <label class="field-label">Fixed virtual stake ($)<input class="input" id="matches-stake" type="number" min="0.35" max="5000" step="0.01" value="1.00" /></label>
+          <label class="field-label">Session profit target ($)<input class="input" id="matches-target" type="number" min="0.01" step="0.01" placeholder="Optional" /></label>
+          <label class="field-label">Total loss limit ($)<input class="input" id="matches-loss" type="number" min="0.01" step="0.01" placeholder="Optional" /></label>
+        </div>
+        <p class="hint" id="matches-stage">Fixed stake · $1.00 per virtual entry</p>
+        <p class="hint" id="matches-preset-note">Same selected digit and stake throughout the session. No Martingale or loss-based stake increases.</p>
+        <div class="run-row">
+          <button class="btn btn-primary btn-lg" id="matches-start" type="button">Start</button>
+          <button class="btn btn-outline btn-lg" id="matches-pause" type="button" disabled>Pause</button>
+          <button class="btn btn-stop btn-lg" id="matches-stop" type="button" disabled>Stop</button>
+        </div>
+        <p class="hint" id="matches-status" role="status">Waiting for live Deriv data.</p>
+        <p class="hint" id="matches-quote">Payout requires a current public Deriv Matches quote. No substitute payout is used.</p>
+        <div class="metric-grid">
+          <div class="tile"><span class="tile-label">Virtual wins</span><span class="tile-value win" id="matches-wins">0</span></div>
+          <div class="tile"><span class="tile-label">Virtual losses</span><span class="tile-value loss" id="matches-losses">0</span></div>
+          <div class="tile"><span class="tile-label">Virtual win rate</span><span class="tile-value" id="matches-rate">—</span></div>
+          <div class="tile"><span class="tile-label">Virtual session P/L</span><span class="tile-value" id="matches-pnl">$0.00</span></div>
+        </div>
+        <p class="hint" id="matches-count">0 settled virtual outcomes.</p>
+        <div class="table-wrap history-scroll matches-history"><table class="table"><thead><tr><th># / time</th><th>Digit / result</th><th>Virtual stake</th><th>Virtual P/L</th></tr></thead><tbody id="matches-history"></tbody></table></div>
+        <p class="hint">Simulation only: an entry opens on a live tick after its quote arrives and settles on the following tick. Public quotes are pricing assumptions, not actual contracts or guaranteed historical fills. Your genuine account balance above stays separate.</p>
+      </section>
+
       <section class="card metrics-card" data-testid="session-metrics-card">
         <div class="card-kicker" id="session-label">Recent settled contracts · genuine Deriv activity</div>
         <div class="metric-grid">
@@ -181,6 +210,8 @@
     </dialog>
 
     <div class="toast-container" id="toast-container" data-testid="toast-container" aria-live="polite"></div>
+    <script src="/matches-simulator.js" defer></script>
     <script src="/account.js" defer></script>
+    <script src="/matches-lab.js" defer></script>
   </body>
 </html>

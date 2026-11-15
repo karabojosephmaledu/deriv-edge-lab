@@ -21,7 +21,7 @@ const DEFAULT_CONFIG = {
 const PKCE_KEY = "del.pkce", ACTIVE_KEY = "del.displayAccount", SETTINGS_KEY = "del.settings.v4";
 const state = { cfg: {...DEFAULT_CONFIG}, selected: null, view: null, csrf: null, sessionView: null,
   checking: false, auth: "checking", error: null, generation: 0, controller: null,
-  pub: null, feed: "connecting", trail: [], digits: [], lastEpoch: 0, retry: 1000, marketGeneration: 0,
+  pub: null, feed: "connecting", trail: [], digits: [], lastEpoch: 0, lastTickAt: 0, retry: 1000, marketGeneration: 0,
   settings: { sound: true }, notices: new Map(), saved: [] };
 function ssGet(key) {
   try {
@@ -328,13 +328,14 @@ async function loadConfig(attempt = 0) {
 function renderMarket() {
   $("connection-status-text").textContent = (state.feed === "live" ? "Live · " : state.feed === "unavailable" ? "Reconnecting · " : "Connecting · ") + $("symbol-select").value;
   $("status-dot").className = "dot " + (state.feed === "live" ? "dot-live" : "dot-warn");
+  window.matchesLab?.render();
 }
 function tick(t) {
   const symbol = $("symbol-select").value;
   if (!t || t.symbol !== symbol || ![t.quote,t.pip_size,t.epoch].every(v => typeof v === "number" || typeof v === "string" && v.trim() !== "")) return;
   const price = Number(t.quote), pip = Number(t.pip_size), epoch = Number(t.epoch);
   if (!Number.isFinite(price) || price <= 0 || !Number.isInteger(pip) || pip < 0 || pip > 20 || !Number.isInteger(epoch) || epoch <= state.lastEpoch) return;
-  state.lastEpoch = epoch; state.feed = "live"; renderMarket();
+  state.lastEpoch = epoch; state.lastTickAt = Date.now(); state.feed = "live"; renderMarket();
   const text = price.toFixed(pip), digit = Number(text.at(-1));
   $("quote-main").textContent = text.slice(0,-1); $("quote-digit").textContent = digit;
   $("quote-meta").textContent = (SYMBOLS.find(s => s[0] === symbol)?.[1] || symbol) + " · " + timestamp(epoch) + " · live";
@@ -343,6 +344,7 @@ function tick(t) {
   const trail = $("tick-trail"); trail.textContent = "";
   for (let i=0;i<10;i++) { const el=document.createElement("span"); el.className="digit-cell"+(i===0?" newest":""); el.textContent=state.trail[i] ?? "·"; trail.append(el); }
   renderFrequency();
+  window.matchesLab?.feed({symbol,price,pip,epoch});
 }
 function renderFrequency() {
   const counts=Array.from({length:10},(_,d)=>state.digits.filter(n=>n===d).length), max=Math.max(1,...counts), wrap=$("digit-frequency"); wrap.textContent="";
@@ -350,6 +352,7 @@ function renderFrequency() {
     col.innerHTML='<div class="freq-track"><div class="freq-bar" style="height:'+(100*n/max)+'%"></div></div><span class="freq-label">'+d+'</span>'; wrap.append(col);});
 }
 async function subscribeMarket() {
+  if(state.marketGeneration>0) window.matchesLab?.interrupt("Market feed restarted or changed · any open virtual result is unresolved");
   const gen=++state.marketGeneration, symbol=$("symbol-select").value;
   state.lastEpoch=0; state.trail=[]; state.digits=[]; state.feed="connecting"; renderMarket(); renderFrequency();
   $("quote-main").textContent="—"; $("quote-digit").textContent=""; $("tick-trail").textContent="";
@@ -362,6 +365,7 @@ async function subscribeMarket() {
 function connectPublic() {
   if(state.pub?.isBusy())return;
   if(!state.pub) state.pub=makeSocket({onOpen:()=>{state.retry=1000; void subscribeMarket();},onMessage:m=>{if(m.msg_type==="tick")tick(m.tick);},onClose:()=>{
+    window.matchesLab?.interrupt("Live market disconnected · any open virtual result is unresolved");
     state.feed="unavailable"; renderMarket(); const delay=state.retry; state.retry=Math.min(30000,state.retry*2); setTimeout(connectPublic,delay);
   }});
   state.pub.open(DEFAULT_CONFIG.public_ws_url);
