@@ -1,0 +1,208 @@
+diff --git a/backend/lib/deriv_demo.py b/backend/lib/deriv_demo.py
+index ae932c4..a8d2d5f 100644
+--- a/backend/lib/deriv_demo.py
++++ b/backend/lib/deriv_demo.py
+@@ -17,0 +18 @@ from urllib.parse import quote, urlsplit
++from typing import Literal
+@@ -75,0 +77 @@ class RunConfig(BaseModel):
++    digit_mode: Literal["fixed", "cold50"] = "fixed"
+@@ -200,0 +203,2 @@ class Session:
++    digit_history: list = field(default_factory=list)
++    automatic_digit: int | None = None
+@@ -210,0 +215,2 @@ class Session:
++                        "digit_mode": self.cfg.digit_mode if self.cfg else None,
++                        "digit_observations": len(self.digit_history), "automatic_digit": self.automatic_digit,
+@@ -306,0 +313 @@ class Broker:
++        s.digit_history, s.automatic_digit = [], None
+@@ -362,0 +370,6 @@ class Broker:
++            pip = tick.get("pip_size")
++            if isinstance(pip, (int, float)) and not isinstance(pip, bool) and math.isfinite(pip) and pip == int(pip) and 0 <= pip <= 10:
++                s.digit_history.append(int(format(price, f".{int(pip)}f")[-1]))
++                s.digit_history = s.digit_history[-50:]
++            elif s.cfg.digit_mode == "cold50":
++                s.digit_history = []  # No automatic entry from incomplete precision data.
+@@ -398,0 +412 @@ class Broker:
++        s.digit_history, s.automatic_digit = [], None
+@@ -417,0 +432,6 @@ class Broker:
++        if c.product == "differs" and c.digit_mode == "cold50":
++            if len(s.digit_history) < 50:
++                return s.public()
++            counts = [s.digit_history.count(d) for d in range(10)]
++            s.automatic_digit = min(range(10), key=lambda d: (counts[d], d))
++            c = c.model_copy(update={"digit": s.automatic_digit})
+@@ -437,7 +457,3 @@ class Broker:
+-        # Display metadata only: unavailable quote details must not change execution.
+-        quoted_payout = None
+-        if c.product == "differs":
+-            with contextlib.suppress(DemoError):
+-                value = amount(proposal.get("payout"))
+-                if value > price:
+-                    quoted_payout = value
++        quoted_payout = amount(proposal.get("payout")) if c.product == "differs" else None
++        if quoted_payout is not None and quoted_payout <= price:
++            raise DemoError("Deriv returned no positive Differs profit in the authenticated quote.", 502)
+@@ -453,0 +470 @@ class Broker:
++                 "digit": c.digit, "label": {"differs": f"Differs {c.digit}", "accu": f"Accumulator {c.growth:.0%}", "mult": f"Multiplier ×{c.mult} {c.direction}"}[c.product],
+@@ -456 +472,0 @@ class Broker:
+-                 "digit": c.digit, "label": {"differs": f"Differs {c.digit}", "accu": f"Accumulator {c.growth:.0%}", "mult": f"Multiplier ×{c.mult} {c.direction}"}[c.product],
+diff --git a/backend/tests/test_demo_execution.py b/backend/tests/test_demo_execution.py
+index ae3a046..d706394 100644
+--- a/backend/tests/test_demo_execution.py
++++ b/backend/tests/test_demo_execution.py
+@@ -208 +208 @@ def test_research_update_keeps_demo_settlement_and_session_limit_calculations_un
+-    for name in ["select", "start", "message", "monitor", "limit_reached"]:
++    for name in ["monitor", "limit_reached"]:
+@@ -213,22 +212,0 @@ def test_research_update_keeps_demo_settlement_and_session_limit_calculations_un
+-def test_demo_configuration_cannot_accept_an_experimental_digit_policy():
+-    with pytest.raises(ValidationError):
+-        RunConfig(symbol="R_100", product="differs", stake=100, digit_mode="cold50")
+-    assert set(RunConfig.model_fields) == {"symbol", "product", "stake", "digit", "growth", "mult", "direction", "target", "max_loss", "max_trades"}
+-
+-
+-@pytest.mark.asyncio
+-async def test_missing_payout_metadata_does_not_change_demo_execution_decisions():
+-    b, s = await setup(digit=7)
+-    request = s.channel.request
+-    async def no_display_payout(payload):
+-        response = await request(payload)
+-        if "proposal" in payload:
+-            response["proposal"].pop("payout", None)
+-        return response
+-    s.channel.request = no_display_payout
+-    await b.signal(s)
+-    assert s.pending["digit"] == 7 and s.pending["quoted_payout"] is None
+-    assert len([p for p in s.channel.calls if "buy" in p]) == 1
+-    await b.shutdown()
+-
+-
+@@ -321,0 +300,18 @@ async def test_actual_proposals_and_single_buy_per_pending_order(product, contra
++@pytest.mark.asyncio
++async def test_automatic_digit_requires_fifty_verified_ticks_and_ignores_the_browser_digit():
++    b = FakeBroker()
++    s = await b.create(TOKEN, "oauth", 3600, ORIGIN)
++    await b.start(s, RunConfig(symbol="R_100", product="differs", stake=100, digit=9, digit_mode="cold50"))
++    now = int(time.time())
++    for i in range(49):
++        b.message(s, {"tick": {"symbol": "R_100", "quote": 100.02, "epoch": now - 98 + i * 2, "pip_size": 2}})
++    await b.signal(s)
++    assert not any("buy" in p for p in s.channel.calls)
++    assert s.public()["run"]["digit_observations"] == 49
++    b.message(s, {"tick": {"symbol": "R_100", "quote": 100.05, "epoch": now, "pip_size": 2}})
++    await b.signal(s)
++    proposal = next(p for p in s.channel.calls if "proposal" in p)
++    assert proposal["barrier"] == "0" and s.automatic_digit == 0
++    assert s.pending["digit"] == 0 and s.pending["quoted_profit"] == 9
++    assert s.pending["quoted_payout"] == 109
++    await b.shutdown()
+@@ -323,0 +320,12 @@ async def test_actual_proposals_and_single_buy_per_pending_order(product, contra
++@pytest.mark.asyncio
++async def test_automatic_digits_do_not_count_duplicates_or_unknown_precision():
++    b, s = await setup(digit_mode="cold50")
++    s.last_tick = None
++    now = int(time.time())
++    tick = {"symbol": "R_100", "quote": 100.02, "epoch": now - 2, "pip_size": 2}
++    b.message(s, {"tick": tick}); b.message(s, {"tick": tick})
++    assert len(s.digit_history) == 1
++    b.message(s, {"tick": {**tick, "epoch": now, "pip_size": None}})
++    await b.signal(s)
++    assert s.digit_history == [] and not any("buy" in p for p in s.channel.calls)
++    await b.shutdown()
+@@ -492,9 +499,0 @@ def test_validation_errors_do_not_echo_credentials(demo_http):
+-def test_research_digit_policies_are_rejected_by_the_demo_http_route(demo_http):
+-    client, b = demo_http
+-    login = client.post("/api/deriv/session", json={"token": TOKEN}, headers={"Origin": ORIGIN})
+-    response = client.post("/api/deriv/demo/start", headers={"Origin": ORIGIN, "X-Deriv-CSRF": login.json()["csrf"]},
+-        json={"symbol": "R_100", "product": "differs", "stake": 1, "digit_mode": "cold50"})
+-    assert response.status_code == 422
+-    assert not any(s.cfg for s in b.sessions.values())
+-
+-
+diff --git a/frontend/index.html b/frontend/index.html
+index ccbe993..6284707 100644
+--- a/frontend/index.html
++++ b/frontend/index.html
+@@ -152,13 +152,2 @@
+-            <div class="card-kicker">Select digit 0–9 · avoid this digit</div>
+-            <div class="digit-grid" role="group" aria-label="Digit selection">
+-              <button class="digit" type="button" data-testid="digit-button-0" data-digit="0" aria-pressed="false"><span class="digit-num">0</span><span class="digit-pay" data-testid="digit-pay-0" data-digit-pay="0">—</span></button>
+-              <button class="digit" type="button" data-testid="digit-button-1" data-digit="1" aria-pressed="false"><span class="digit-num">1</span><span class="digit-pay" data-testid="digit-pay-1" data-digit-pay="1">—</span></button>
+-              <button class="digit" type="button" data-testid="digit-button-2" data-digit="2" aria-pressed="false"><span class="digit-num">2</span><span class="digit-pay" data-testid="digit-pay-2" data-digit-pay="2">—</span></button>
+-              <button class="digit" type="button" data-testid="digit-button-3" data-digit="3" aria-pressed="false"><span class="digit-num">3</span><span class="digit-pay" data-testid="digit-pay-3" data-digit-pay="3">—</span></button>
+-              <button class="digit" type="button" data-testid="digit-button-4" data-digit="4" aria-pressed="false"><span class="digit-num">4</span><span class="digit-pay" data-testid="digit-pay-4" data-digit-pay="4">—</span></button>
+-              <button class="digit" type="button" data-testid="digit-button-5" data-digit="5" aria-pressed="false"><span class="digit-num">5</span><span class="digit-pay" data-testid="digit-pay-5" data-digit-pay="5">—</span></button>
+-              <button class="digit" type="button" data-testid="digit-button-6" data-digit="6" aria-pressed="false"><span class="digit-num">6</span><span class="digit-pay" data-testid="digit-pay-6" data-digit-pay="6">—</span></button>
+-              <button class="digit" type="button" data-testid="digit-button-7" data-digit="7" aria-pressed="false"><span class="digit-num">7</span><span class="digit-pay" data-testid="digit-pay-7" data-digit-pay="7">—</span></button>
+-              <button class="digit" type="button" data-testid="digit-button-8" data-digit="8" aria-pressed="false"><span class="digit-num">8</span><span class="digit-pay" data-testid="digit-pay-8" data-digit-pay="8">—</span></button>
+-              <button class="digit" type="button" data-testid="digit-button-9" data-digit="9" aria-pressed="false"><span class="digit-num">9</span><span class="digit-pay" data-testid="digit-pay-9" data-digit-pay="9">—</span></button>
+-            </div>
++            <div class="card-kicker">Automatic digit choice · experimental</div>
++            <p class="hint">Differs avoids the least frequent digit in the previous 50 verified ticks. Ties use the lowest digit. Frequency does not predict the next digit.</p>
+diff --git a/frontend/public/app.js b/frontend/public/app.js
+index 65391d2..b393d18 100644
+--- a/frontend/public/app.js
++++ b/frontend/public/app.js
+@@ -103 +103 @@ const state = {
+-    symbol: "R_100", product: "differs", digit: 5, autoDigit: false, stake: 1, entryFilter: false,
++    symbol: "R_100", product: "differs", digit: 5, autoDigit: true, stake: 1, entryFilter: false,
+@@ -574 +574 @@ function currentCfg() {
+-    const digit = s.autoDigit && state.freqQueue.length >= 30 ? coldestDigit(state.freqQueue) : s.digit;
++    const digit = s.autoDigit && state.freqQueue.length >= 50 ? coldestDigit(state.freqQueue.slice(-50)) : s.digit;
+@@ -645,0 +646 @@ function simulateTick(price, digit) {
++  if (state.settings.product === "differs" && state.settings.autoDigit && state.freqQueue.length < 50) return;
+@@ -952,2 +953 @@ async function runVirtualResearch() {
+-    $("research-selection").textContent = report.decision + ". " + report.selectionNote +
+-      (report.selected ? " Staking reference: " + report.stakingReference + "." : " No staking projection is made.") + " Selection never uses the held-out results. No strategy is promoted to the bot.";
++    $("research-selection").textContent = report.selectionNote + " Staking reference: " + report.stakingReference + ". Selection never uses the held-out results. No strategy is promoted to the bot.";
+@@ -1206 +1206 @@ async function startDemoSession() {
+-  if (state.settings.autoDigit || state.settings.entryFilter) return toast("Experimental comparison filters remain simulation-only. Use manual settings for Demo execution.", "info");
++  if (state.settings.entryFilter) return toast("Experimental comparison filters remain simulation-only.", "info");
+@@ -1211 +1211 @@ async function startDemoSession() {
+-      symbol: s.symbol, product: s.product, stake: s.stake, digit: s.digit, growth: s.growth,
++      symbol: s.symbol, product: s.product, stake: s.stake, digit: s.digit, digit_mode: "cold50", growth: s.growth,
+@@ -1409,0 +1410,13 @@ function renderDigitExplain() {
++  if (state.execution === "demo") {
++    const run = state.demo;
++    $("digit-explain").textContent = run?.digit_mode === "cold50" ? run.automatic_digit == null ?
++      "Collecting authenticated Demo ticks: " + (run.digit_observations || 0) + "/50. No entry until ready." :
++      "Last automatic Demo choice: avoid " + run.automatic_digit + ". Based on 50 past authenticated ticks, not a prediction." :
++      "A new Demo session uses automatic choice after 50 authenticated ticks. An existing fixed-digit contract keeps its original settings.";
++    return;
++  }
++  if (s.autoDigit) {
++    $("digit-explain").textContent = state.freqQueue.length < 50 ? "Collecting verified ticks: " + state.freqQueue.length + "/50. No entry until ready." :
++      "Automatic choice: avoid " + coldestDigit(state.freqQueue.slice(-50)) + " · previous 50 ticks. No proven predictive advantage.";
++    return;
++  }
+@@ -1686 +1698,0 @@ function bindEvents() {
+-  document.querySelectorAll(".digit").forEach((b) => on(b, "click", () => changeSetting({ digit: Number(b.dataset.digit) })));
+@@ -1714,7 +1725,0 @@ function bindEvents() {
+-  document.addEventListener("keydown", (e) => {
+-    if ($("connect-dialog").open || state.settings.product !== "differs") return;
+-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+-    if (/^[0-9]$/.test(e.key)) changeSetting({ digit: Number(e.key) });
+-  });
+-
+-
+diff --git a/tests/demo-browser.test.cjs b/tests/demo-browser.test.cjs
+index 7335327..afa9e88 100644
+--- a/tests/demo-browser.test.cjs
++++ b/tests/demo-browser.test.cjs
+@@ -173 +173 @@ test("browser Demo: late status responses cannot replace newer controls or balan
+-test("browser Demo: manual digits are preserved and payout risk uses actual $15.05 settlements, not public estimates", { timeout: 15000 }, async t => {
++test("browser Demo: manual digits are removed and payout risk uses actual $15.05 settlements, not public estimates", { timeout: 15000 }, async t => {
+@@ -175 +175 @@ test("browser Demo: manual digits are preserved and payout risk uses actual $15.
+-  assert.equal(await page.locator("button[data-digit]").count(), 10);
++  assert.equal(await page.locator("button[data-digit]").count(), 0);
+@@ -189,12 +188,0 @@ test("browser Demo: manual digits are preserved and payout risk uses actual $15.
+-
+-test("browser Demo: research selection cannot replace the manual Demo digit", { timeout: 15000 }, async t => {
+-  const page = await open(t);
+-  await page.locator("#execution-mode").selectOption("demo");
+-  await page.locator('button[data-digit="7"]').click();
+-  await page.locator("#start-btn").click();
+-  await page.waitForFunction(() => state.demo?.status === "running" && !state.demoBusy);
+-  const start = model.calls.find(c => c.path === "/api/deriv/demo/start");
+-  assert.equal(start.body.digit, 7);
+-  assert.equal("digit_mode" in start.body, false);
+-  assert.equal(await page.evaluate(() => state.settings.autoDigit), false);
+-});
