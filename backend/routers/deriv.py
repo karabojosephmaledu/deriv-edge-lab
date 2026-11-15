@@ -187,7 +187,9 @@ async def token_session(body: TokenConnect, request: Request, response: Response
 
 @router.get("/deriv/session")
 async def session_status(request: Request):
-    return session(request).public()
+    s = session(request)
+    await checked(broker().refresh_account_views(s))
+    return s.public()
 
 
 @router.post("/deriv/account")

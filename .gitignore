@@ -96,3 +96,5 @@ credentials.json
 # Safe templates (variable names only) are committed
 !.env.example
 !env.example
+# Reproducible, generated research output; public input snapshot is versioned.
+research/results.json

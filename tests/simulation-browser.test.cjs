@@ -19,7 +19,7 @@ before(async () => {
       res.end(JSON.stringify({ oauth_ready: false }));
       return;
     }
-    const files = { "/": "index.html", "/app.js": "public/app.js", "/styles.css": "public/styles.css", "/favicon.svg": "public/favicon.svg" };
+    const files = { "/": "index.html", "/app.js": "public/app.js", "/research.js": "public/research.js", "/styles.css": "public/styles.css", "/favicon.svg": "public/favicon.svg" };
     const file = files[req.url];
     if (!file) { res.writeHead(404).end(); return; }
     res.setHeader("Content-Type", file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" : file.endsWith(".svg") ? "image/svg+xml" : "text/html");
@@ -55,9 +55,13 @@ async function dashboard(t, viewport = { width: 1440, height: 900 }) {
         if (q.buy || q.sell || q.contract_update) throw new Error("Orders forbidden in simulation tests");
         let msg = {};
         if (q.proposal) msg = { msg_type: "proposal", proposal: {
-          ask_price: q.amount, payout: q.amount * 1.09, commission: 0.36,
+          ask_price: q.amount, payout: q.amount * (q.contract_type === "DIGITMATCH" ? 9 : q.contract_type === "DIGITDIFF" ? 1.09 : 1.9), commission: 0.36,
           contract_details: { tick_size_barrier: 0.000537, maximum_ticks: 230 },
         } };
+        if (q.ticks_history) msg = { history: {
+          prices: Array.from({ length: 1000 }, (_, i) => 100 + ((i * 7) % 10) / 100),
+          times: Array.from({ length: 1000 }, (_, i) => 1700000000 + i * 2),
+        }, pip_size: 2 };
         if (q.ticks) this.symbol = q.ticks;
         setTimeout(() => this.onmessage?.({ data: JSON.stringify({ ...msg, req_id: q.req_id }) }), 0);
       }
@@ -77,6 +81,7 @@ async function dashboard(t, viewport = { width: 1440, height: 900 }) {
   await page.goto(origin);
   await page.waitForFunction(() => window.__requests.some((q) => q.ticks));
   await page.evaluate(() => window.__tick());
+  await page.evaluate(() => { state.settings.autoDigit = false; }); // Legacy session fixtures; automatic choice has its own check.
   await page.locator("#stake-input").fill("100");
   await page.locator("#stake-input").dispatchEvent("change");
   return page;
@@ -160,4 +165,37 @@ test("browser: mobile dashboard retains its layout with unresolved-status text",
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   assert.ok(overflow <= 2, `Horizontal overflow: ${overflow}px`);
   assert.equal(await page.locator("#start-btn").isVisible(), true);
+});
+
+test("browser: virtual research compares contracts and staking without changing the account or simulation", { timeout: 20000 }, async t => {
+  const page = await dashboard(t, { width: 390, height: 844 });
+  await page.evaluate(() => {
+    const timer = window.setTimeout.bind(window);
+    window.setTimeout = (fn, ms, ...args) => timer(fn, ms === 1100 ? 0 : ms, ...args);
+  });
+  await page.locator("#lab-card > summary").click();
+  await page.locator("#research-panel > summary").click();
+  await page.locator("#research-balance").fill("1");
+  await page.locator("#research-run").click();
+  await page.locator("#research-output").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#research-body tr").count(), 23);
+  assert.equal(await page.locator("#research-staking tr").count(), 4);
+  assert.match(await page.locator("#research-status").innerText(), /final 40% held out/);
+  assert.match(await page.locator("#research-body").innerText(), /stake outside configured contract limits/);
+  assert.match(await page.locator("#research-caveat").innerText(), /not historical executable quotes/);
+  assert.equal(await page.locator("#stat-pnl").innerText(), "$0.00");
+  assert.equal(await page.evaluate(() => state.execution), "simulation");
+  assert.equal(await page.evaluate(() => window.__requests.some(q => q.buy || q.sell || q.authorize)), false);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth) <= 2);
+});
+
+test("browser: research refuses invalid funding and shows no substituted results", { timeout: 15000 }, async t => {
+  const page = await dashboard(t);
+  await page.locator("#lab-card > summary").click();
+  await page.locator("#research-panel > summary").click();
+  await page.locator("#research-balance").fill("0");
+  await page.locator("#research-run").click();
+  await page.waitForFunction(() => document.querySelector("#research-status").textContent.startsWith("Research stopped:"));
+  assert.match(await page.locator("#research-status").innerText(), /positive amounts/);
+  assert.equal(await page.locator("#research-output").isHidden(), true);
 });

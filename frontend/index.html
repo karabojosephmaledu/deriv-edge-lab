@@ -52,7 +52,7 @@
           <div class="card-kicker">Deriv account</div>
           <div id="account-empty">
             <p class="muted account-copy">Connect your Deriv Demo account. Credentials stay on the secure backend.</p>
-            <button class="btn btn-primary" id="connect-button" data-testid="connect-button" type="button">Connect account</button>
+            <button class="btn btn-primary" id="connect-button" data-testid="connect-button" type="button">Connect with Deriv</button>
           </div>
           <div id="account-live" hidden>
             <div class="owner-row">
@@ -73,7 +73,13 @@
               <span id="account-loginid" data-testid="account-loginid"></span>
               <button class="btn btn-ghost btn-sm" id="disconnect-button" data-testid="disconnect-button" type="button">Disconnect</button>
             </div>
+            <details id="linked-accounts" hidden>
+              <summary>Authorized accounts · view only</summary>
+              <div id="linked-accounts-list" class="hint"></div>
+              <p id="linked-accounts-time" class="hint"></p>
+            </details>
           </div>
+          <a href="https://home.deriv.com/" target="_blank" rel="noopener noreferrer" class="hint">Open Deriv portal in another tab ↗</a>
         </div>
         <div class="shield" data-testid="execution-disabled-note">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -134,8 +140,8 @@
 
           <div class="ticket" id="contract-ticket" data-testid="contract-ticket">
             <div><span class="tk-label">Stake</span><span id="tk-stake" data-testid="ticket-stake">—</span></div>
-            <div><span class="tk-label">Payout if win</span><span id="tk-payout" data-testid="ticket-payout">—</span></div>
-            <div><span class="tk-label">Profit if win</span><span class="pl-pos" id="tk-profit" data-testid="ticket-profit">—</span></div>
+            <div><span class="tk-label" id="tk-payout-label">Payout if win</span><span id="tk-payout" data-testid="ticket-payout">—</span></div>
+            <div><span class="tk-label" id="tk-profit-label">Profit if win</span><span class="pl-pos" id="tk-profit" data-testid="ticket-profit">—</span></div>
             <div><span class="tk-label">Max loss</span><span class="pl-neg" id="tk-loss" data-testid="ticket-loss">—</span></div>
             <p class="hint tk-note" id="tk-note" data-testid="ticket-note"></p>
           </div>
@@ -143,19 +149,8 @@
 
         <section class="card matrix-card" data-testid="digit-matrix-card">
           <div id="digit-section">
-            <div class="card-kicker">Select digit 0–9 · avoid this digit</div>
-            <div class="digit-grid" role="group" aria-label="Digit selection">
-              <button class="digit" type="button" data-testid="digit-button-0" data-digit="0" aria-pressed="false"><span class="digit-num">0</span><span class="digit-pay" data-testid="digit-pay-0" data-digit-pay="0">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-1" data-digit="1" aria-pressed="false"><span class="digit-num">1</span><span class="digit-pay" data-testid="digit-pay-1" data-digit-pay="1">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-2" data-digit="2" aria-pressed="false"><span class="digit-num">2</span><span class="digit-pay" data-testid="digit-pay-2" data-digit-pay="2">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-3" data-digit="3" aria-pressed="false"><span class="digit-num">3</span><span class="digit-pay" data-testid="digit-pay-3" data-digit-pay="3">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-4" data-digit="4" aria-pressed="false"><span class="digit-num">4</span><span class="digit-pay" data-testid="digit-pay-4" data-digit-pay="4">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-5" data-digit="5" aria-pressed="false"><span class="digit-num">5</span><span class="digit-pay" data-testid="digit-pay-5" data-digit-pay="5">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-6" data-digit="6" aria-pressed="false"><span class="digit-num">6</span><span class="digit-pay" data-testid="digit-pay-6" data-digit-pay="6">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-7" data-digit="7" aria-pressed="false"><span class="digit-num">7</span><span class="digit-pay" data-testid="digit-pay-7" data-digit-pay="7">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-8" data-digit="8" aria-pressed="false"><span class="digit-num">8</span><span class="digit-pay" data-testid="digit-pay-8" data-digit-pay="8">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-9" data-digit="9" aria-pressed="false"><span class="digit-num">9</span><span class="digit-pay" data-testid="digit-pay-9" data-digit-pay="9">—</span></button>
-            </div>
+            <div class="card-kicker">Automatic digit choice · experimental</div>
+            <p class="hint">Differs avoids the least frequent digit in the previous 50 verified ticks. Ties use the lowest digit. Frequency does not predict the next digit.</p>
             <p class="hint digit-explain" id="digit-explain" data-testid="digit-explain"></p>
           </div>
 
@@ -236,6 +231,32 @@
             </table>
             <p class="hint" id="lab-note" data-testid="lab-note"></p>
           </div>
+          <details class="research-panel" id="research-panel">
+            <summary>Virtual strategy and risk study · separate from Demo trading</summary>
+            <p class="hint">Compare contracts using public history and a separate virtual wallet. New signals fill on the following tick. No account orders are sent.</p>
+            <div class="research-fields">
+              <label class="field-label">Virtual balance ($)<input class="input" id="research-balance" type="number" min="0.01" step="0.01" value="10" list="research-balances" /></label>
+              <datalist id="research-balances"><option value="1"><option value="2.5"><option value="5"><option value="8"><option value="10"><option value="1000"></datalist>
+              <label class="field-label">Base stake ($)<input class="input" id="research-stake" type="number" min="0.35" step="0.01" value="0.35" /></label>
+              <label class="field-label">Session profit target ($)<input class="input" id="research-target" type="number" min="0.01" step="0.01" placeholder="Optional" /></label>
+              <label class="field-label">Session loss limit ($)<input class="input" id="research-loss" type="number" min="0.01" step="0.01" placeholder="Optional" /></label>
+            </div>
+            <p class="hint">Contract floors: $0.35 for the binary studies, $1 for Accumulators/Multipliers. Unavailable proposals are skipped; lower balances never create credit or a smaller fictional contract. These floors are conservative research limits; provider availability and limits may change.</p>
+            <button class="btn btn-primary" id="research-run" type="button">Compare virtual strategies</button>
+            <p class="hint" id="research-status" role="status" aria-live="polite"></p>
+            <div class="table-wrap" id="research-output" hidden>
+              <table class="table"><caption>Held-out results · estimates, not actual account trades</caption>
+                <thead><tr><th>Strategy</th><th>Trades / wins</th><th>Net P/L</th><th>Avg win / loss</th><th>Break-even wins</th><th>Max drawdown</th><th>Longest losses</th><th>Status</th></tr></thead>
+                <tbody id="research-body"></tbody>
+              </table>
+              <p class="hint" id="research-selection"></p>
+              <table class="table"><caption>Virtual staking risk · Martingale is a risk example only</caption>
+                <thead><tr><th>Staking model</th><th>Trades</th><th>Net P/L</th><th>Max drawdown</th><th>Available balance</th><th>Status</th></tr></thead>
+                <tbody id="research-staking"></tbody>
+              </table>
+              <p class="hint" id="research-caveat"></p>
+            </div>
+          </details>
         </div>
       </details>
 
@@ -248,10 +269,10 @@
       <div class="dialog-inner">
         <div class="dialog-head">
           <h2 id="connect-title">Connect Deriv account</h2>
-          <p class="dialog-sub">View-only during testing — no orders are sent to your account.</p>
+          <p class="dialog-sub">Official login returns you here. Connecting alone sends no orders; only explicit Demo mode and Start can submit Demo contracts. Real-money trading is blocked.</p>
         </div>
         <div class="oauth-block" id="oauth-block" hidden>
-          <button class="btn btn-primary btn-block" id="oauth-connect-button" data-testid="oauth-connect-button" type="button">Login with Deriv</button>
+          <button class="btn btn-primary btn-block" id="oauth-connect-button" data-testid="oauth-connect-button" type="button">Connect with Deriv</button>
           <p class="hint">You approve access on deriv.com and return here. Your Deriv app must list this exact redirect URL:</p>
           <code class="redirect-url" id="oauth-redirect-url" data-testid="oauth-redirect-url"></code>
         </div>
@@ -261,7 +282,8 @@
           <input class="input" id="token-input" data-testid="token-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Deriv API token" />
           <p class="hint">
             Create one at <a data-testid="token-help-link" href="https://developers.deriv.com/dashboard/" target="_blank" rel="noopener noreferrer">developers.deriv.com → API tokens</a>
-            with <strong>Read</strong> (or Trade) scope. Stored only in this browser tab.
+            using the permissions required by Deriv's account API (currently <strong>trade</strong> for listing Options accounts).
+            Tokens stay in backend memory, not browser storage. Never share a token in chat.
           </p>
           <p class="form-error" id="connect-error" data-testid="connect-error" hidden></p>
           <div class="dialog-actions">
@@ -273,6 +295,7 @@
     </dialog>
 
     <div class="toast-container" id="toast-container" data-testid="toast-container" aria-live="polite"></div>
+    <script src="/research.js" defer></script>
     <script src="/app.js" defer></script>
   </body>
 </html>

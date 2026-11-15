@@ -63,6 +63,7 @@ function harness(script = source) {
   api.state.lastTick = { symbol: "R_100", epoch: 1000 };
   api.state.pub = { isOpen: () => true, request: async () => ({}) };
   api.state.settings.stake = 100;
+  api.state.settings.autoDigit = false; // Legacy fixed-digit fixtures exercise settlement/session integrity.
   api.clampStakeToProduct();
   let epoch = 1000;
   return {
@@ -414,15 +415,27 @@ test("regression: a flat Multiplier still loses its existing $3.60 fallback comm
   assert.equal(a.state.stats.losses, 1);
 });
 
-test("regression: original strategy, payout, precision and filter functions are byte-for-byte unchanged", () => {
+test("regression: original settlement, payout, precision and filter functions are byte-for-byte unchanged", () => {
   const original = execFileSync("git", ["show", "d7974aeb48ecdc41a6c75a6a26ea5e2e5a605d41:frontend/public/app.js"], { cwd: root, encoding: "utf8" });
   const before = harness(original);
   const after = harness();
-  for (const name of ["openContract", "stepContract", "lastDigit", "coldestDigit", "entryAllowed", "currentCfg", "clampStakeToProduct",
+  for (const name of ["openContract", "stepContract", "lastDigit", "coldestDigit", "entryAllowed", "clampStakeToProduct",
     "differsMultiplier", "accuParams", "multCommissionRate", "fetchContractInfo", "subscribeDigitPayouts", "applyDigitProposal"]) {
     assert.equal(after[name].toString(), before[name].toString(), `${name} changed`);
   }
   // Account transport is now server-side for actual Demo execution; strategy math stays identical.
+});
+
+test("automatic Differs waits for 50 ticks, uses only the last 50, and has no manual picker", () => {
+  const a = harness(); a.state.settings.autoDigit = true;
+  a.startSession();
+  for (let i = 0; i < 49; i++) a.tick(100.02);
+  assert.equal(a.state.pos, null);
+  a.tick(100.02);
+  assert.equal(a.state.pos.digit, 0);
+  assert.doesNotMatch(html, /data-digit="\d"|Select digit 0–9/);
+  a.state.freqQueue = [...Array(50).fill(1), ...Array(50).fill(0)];
+  assert.equal(a.currentCfg().digit, 1); // old half of the frequency display cannot influence the choice
 });
 
 test("regression: $100 Accumulator wins retain the original payouts at every growth rate", () => {

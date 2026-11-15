@@ -43,7 +43,7 @@ before(async () => {
       if (req.url === "/api/deriv/disconnect") { model.connected = false; return send(200, { connected: false }); }
       return send(200, snapshot());
     }
-    const files = { "/": "index.html", "/app.js": "public/app.js", "/styles.css": "public/styles.css", "/favicon.svg": "public/favicon.svg" };
+    const files = { "/": "index.html", "/app.js": "public/app.js", "/research.js": "public/research.js", "/styles.css": "public/styles.css", "/favicon.svg": "public/favicon.svg" };
     if (!files[req.url]) { res.writeHead(404).end(); return; }
     res.setHeader("Content-Type", req.url.endsWith(".js") ? "application/javascript" : req.url.endsWith(".css") ? "text/css" : "text/html");
     res.end(readFileSync(resolve(root, files[req.url])));
@@ -168,4 +168,21 @@ test("browser Demo: late status responses cannot replace newer controls or balan
   });
   assert.match(await page.locator("#balance-value").textContent(), /10,000\.00/);
   assert.equal(await page.evaluate(() => state.demo.status), "running");
+});
+
+test("browser Demo: manual digits are removed and payout risk uses actual $15.05 settlements, not public estimates", { timeout: 15000 }, async t => {
+  const page = await open(t);
+  assert.equal(await page.locator("button[data-digit]").count(), 0);
+  await page.locator("#execution-mode").selectOption("demo");
+  assert.equal(await page.locator("#tk-profit").innerText(), "Quoted at entry");
+  await page.evaluate(() => {
+    state.settings.stake = 200;
+    const last = { product: "differs", symbol: "R_100", stake: 200, status: "win", digit: 1,
+      quoted_payout: 219.30, quoted_profit: 19.30, sell_price: 215.05, profit: 15.05 };
+    state.demo = { ...state.demo, history: [last], pending: null };
+    renderTicket();
+  });
+  assert.equal(await page.locator("#tk-profit").innerText(), "+$15.05");
+  assert.match(await page.locator("#tk-note").innerText(), /93\.0% wins/);
+  assert.match(await page.locator("#tk-note").innerText(), /13\.3 such wins/);
 });

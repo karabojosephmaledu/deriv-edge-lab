@@ -163,6 +163,54 @@ async def test_connection_is_demo_only_and_contains_no_credentials():
 
 
 @pytest.mark.asyncio
+async def test_authorized_real_accounts_are_rest_only_views_never_execution_selections():
+    b = FakeBroker()
+    s = await b.create(TOKEN, "oauth", 3600, ORIGIN)
+    views = s.public()["linked_accounts"]
+    assert {a["type"] for a in views} == {"demo", "real"}
+    assert all(a["read_only"] for a in views)
+    assert [a["id"] for a in s.accounts] == ["DOT-test"]
+    assert not any("ROT-test/otp" in p for _, p in b.rest_calls)
+    with pytest.raises(DemoError):
+        await b.select(s, "ROT-test")
+    assert s.account["id"] == "DOT-test"
+    assert TOKEN not in json.dumps(views)
+    await b.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_read_only_views_throttle_refresh_and_keep_timestamped_values_on_failure():
+    b = FakeBroker()
+    s = await b.create(TOKEN, "oauth", 3600, ORIGIN)
+    before = copy.deepcopy(s.linked_accounts)
+    updated_at = s.accounts_updated_at
+    calls = len(b.rest_calls)
+    await b.refresh_account_views(s)
+    assert len(b.rest_calls) == calls
+    async def unavailable(*args):
+        raise DemoError("mock upstream unavailable", 502)
+    b.rest = unavailable
+    s.accounts_checked_at = 0
+    await b.refresh_account_views(s)
+    assert s.linked_accounts == before and s.accounts_updated_at == updated_at
+    assert "refresh failed" in s.accounts_error.lower()
+    assert not any("buy" in p or "sell" in p for p in s.channel.calls)
+    await b.shutdown()
+
+
+def test_research_update_keeps_demo_settlement_and_session_limit_calculations_unchanged():
+    import ast
+    import inspect
+    import subprocess
+    original = subprocess.check_output(["git", "show", "a5556bc:backend/lib/deriv_demo.py"], text=True)
+    tree = ast.parse(original)
+    klass = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Broker")
+    for name in ["monitor", "limit_reached"]:
+        node = next(n for n in klass.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name)
+        assert inspect.getsource(getattr(Broker, name)).strip() == ast.get_source_segment(original, node).strip()
+
+
+@pytest.mark.asyncio
 async def test_real_account_and_real_socket_are_rejected_before_connect_or_buy():
     b = FakeBroker()
     s = Session(TOKEN, "oauth", time.time() + 100, ORIGIN)
@@ -232,6 +280,40 @@ async def test_actual_proposals_and_single_buy_per_pending_order(product, contra
         assert proposals[0]["duration"] == 1 and proposals[0]["barrier"] == "5"
     assert s.pending["contract_id"] == 123
     assert TOKEN not in json.dumps(b.db.demo_orders.rows)
+    await b.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_automatic_digit_requires_fifty_verified_ticks_and_ignores_the_browser_digit():
+    b = FakeBroker()
+    s = await b.create(TOKEN, "oauth", 3600, ORIGIN)
+    await b.start(s, RunConfig(symbol="R_100", product="differs", stake=100, digit=9, digit_mode="cold50"))
+    now = int(time.time())
+    for i in range(49):
+        b.message(s, {"tick": {"symbol": "R_100", "quote": 100.02, "epoch": now - 98 + i * 2, "pip_size": 2}})
+    await b.signal(s)
+    assert not any("buy" in p for p in s.channel.calls)
+    assert s.public()["run"]["digit_observations"] == 49
+    b.message(s, {"tick": {"symbol": "R_100", "quote": 100.05, "epoch": now, "pip_size": 2}})
+    await b.signal(s)
+    proposal = next(p for p in s.channel.calls if "proposal" in p)
+    assert proposal["barrier"] == "0" and s.automatic_digit == 0
+    assert s.pending["digit"] == 0 and s.pending["quoted_profit"] == 9
+    assert s.pending["quoted_payout"] == 109
+    await b.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_automatic_digits_do_not_count_duplicates_or_unknown_precision():
+    b, s = await setup(digit_mode="cold50")
+    s.last_tick = None
+    now = int(time.time())
+    tick = {"symbol": "R_100", "quote": 100.02, "epoch": now - 2, "pip_size": 2}
+    b.message(s, {"tick": tick}); b.message(s, {"tick": tick})
+    assert len(s.digit_history) == 1
+    b.message(s, {"tick": {**tick, "epoch": now, "pip_size": None}})
+    await b.signal(s)
+    assert s.digit_history == [] and not any("buy" in p for p in s.channel.calls)
     await b.shutdown()
 
 

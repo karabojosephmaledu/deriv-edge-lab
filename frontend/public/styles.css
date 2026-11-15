@@ -791,6 +791,15 @@ button { font-family: inherit; }
 .lab-summary .muted { font-weight: 400; font-size: 12px; }
 .lab-body-wrap { margin-top: 12px; display: grid; gap: 10px; justify-items: start; }
 .lab-body-wrap .table-wrap { width: 100%; }
+.research-panel { width: 100%; min-width: 0; border-top: 1px solid var(--border); padding-top: 14px; }
+.research-panel summary { cursor: pointer; color: var(--accent-soft); }
+.research-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 14px 0; }
+.research-fields .field-label { min-width: 0; }
+.research-fields .input { margin-top: 8px; }
+.research-panel .table-wrap { max-width: 100%; overflow-x: auto; }
+.research-panel caption { text-align: left; color: var(--muted); padding: 12px 0; }
+#linked-accounts { margin: 8px 0; }
+#linked-accounts summary { cursor: pointer; color: var(--accent-soft); }
 
 @keyframes flash-in {
   0% { opacity: 0; transform: scale(0.85); }

@@ -82,6 +82,9 @@ const state = {
   demoTimer: null,
   cred: null,
   accounts: [],
+  linkedAccounts: [],
+  linkedAccountsTime: null,
+  linkedAccountsError: null,
   account: null,
   activeId: null,
   owner: null,
@@ -97,7 +100,7 @@ const state = {
   snapshotRevision: 0,
   tradeRetryDelay: 1000,
   settings: {
-    symbol: "R_100", product: "differs", digit: 5, autoDigit: false, stake: 1, entryFilter: false,
+    symbol: "R_100", product: "differs", digit: 5, autoDigit: true, stake: 1, entryFilter: false,
     growth: 0.03, mult: 100, dir: "up", contractTp: 0.1, target: null, maxLoss: null, maxTrades: MAX_TRADES, sound: true,
   },
   trail: [],
@@ -568,7 +571,7 @@ function currentCfg() {
   const s = state.settings;
   const cfg = { product: s.product, stake: s.stake, tp: s.contractTp };
   if (s.product === "differs") {
-    const digit = s.autoDigit && state.freqQueue.length >= 30 ? coldestDigit(state.freqQueue) : s.digit;
+    const digit = s.autoDigit && state.freqQueue.length >= 50 ? coldestDigit(state.freqQueue.slice(-50)) : s.digit;
     Object.assign(cfg, { digit, m: differsMultiplier(digit).m });
   } else if (s.product === "accu") {
     Object.assign(cfg, { growth: s.growth }, accuParams());
@@ -640,6 +643,7 @@ function simulateTick(price, digit) {
   }
   if (state.session !== "running") return;
   if (checkSessionLimits()) return;
+  if (state.settings.product === "differs" && state.settings.autoDigit && state.freqQueue.length < 50) return;
   const cfg = currentCfg();
   const { maxLoss } = state.settings;
   if (maxLoss != null && state.stats.net - cfg.stake < -maxLoss - 1e-9) {
@@ -853,7 +857,7 @@ async function runComparison() {
     const rows = [
       ["Differs · fixed digit " + s.digit, runBacktest(prices, pip, "differs", diff, { mFor })],
       ["Differs · random digit", runBacktest(prices, pip, "differs", diff, { mFor, digitRule: "random" })],
-      ["Differs · auto (coldest, walk-forward)", runBacktest(prices, pip, "differs", diff, { mFor, digitRule: "auto" })],
+      ["Differs · legacy coldest 100 (past only)", runBacktest(prices, pip, "differs", diff, { mFor, digitRule: "auto" })],
       ["Differs · fixed + entry filter", runBacktest(prices, pip, "differs", diff, { mFor, filter: true })],
       ["Accumulator " + Math.round(s.growth * 100) + "%", runBacktest(prices, pip, "accu", accu, {})],
       ["Accumulator + calm-entry filter", runBacktest(prices, pip, "accu", accu, { filter: true })],
@@ -878,7 +882,7 @@ async function runComparison() {
     }
     const be = (1 / differsMultiplier(s.digit).m) * 100;
     $("lab-note").textContent =
-      (prices.length - FREQ_WINDOW) + " ticks of " + s.symbol + ". Differs break-even: " + be.toFixed(1) + "% wins. Small differences are usually chance. P/L is settled only; unresolved end positions have unknown final results. Drawdown includes observed open P/L; zero-profit settlements are break-even.";
+      (prices.length - FREQ_WINDOW) + " ticks of " + s.symbol + ". Estimated replay using current public quotes, not historical executable payouts. Differs: " + (differsMultiplier(s.digit).live ? "public quote" : "fallback estimate") + "; Accumulator: " + (accuParams().live ? "quoted barrier" : "fallback barrier") + "; Multiplier: " + (multCommissionRate().live ? "quoted fee" : "fallback fee") + ". Differs break-even: " + be.toFixed(1) + "% wins. Small differences are usually chance. P/L is settled only; unresolved end positions have unknown final results. Drawdown includes observed open P/L; zero-profit settlements are break-even.";
     $("lab-output").hidden = false;
   } catch (err) {
     toast("Comparison failed: " + errText(err), "error");
@@ -886,6 +890,73 @@ async function runComparison() {
     btn.disabled = false;
     btn.textContent = "Run comparison";
   }
+}
+
+/* Independent virtual wallet and walk-forward studies. Public reads only. */
+async function runVirtualResearch() {
+  const button = $("research-run"), status = $("research-status"), engine = window.DerivResearch;
+  if (!engine) return toast("Research module unavailable. Refresh the page.", "error");
+  if (!liveSimulationReady() || !state.pub?.isOpen()) return toast("Research needs verified live public market data.", "error");
+  const limit = (id) => {
+    const raw = $(id).value.trim();
+    if (!raw) return null;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) throw new Error("Session limits must be positive or left blank.");
+    return value;
+  };
+  button.disabled = true; $("research-output").hidden = true;
+  try {
+    const options = { balance: Number($("research-balance").value), stake: Number($("research-stake").value),
+      target: limit("research-target"), maxLoss: limit("research-loss"), direction: state.settings.dir };
+    if (![options.balance, options.stake].every(v => Number.isFinite(v) && v > 0 && engine.cents(v) === v)) throw new Error("Use positive amounts with at most two decimal places.");
+    const { symbol, mult, growth } = state.settings;
+    const pub = state.pub;
+    status.textContent = "Reading public history. Your Deriv balance and session are separate.";
+    const history = await pub.request({ ticks_history: symbol, count: 1000, end: "latest", style: "ticks" }, 30000);
+    const data = { symbol, prices: (history.history?.prices || []).map(Number), times: history.history?.times || [], pip: Number(history.pip_size) };
+    engine.validate(data);
+    const specs = engine.quoteSpecs(symbol, data.prices.at(-1), { stake: options.stake, mult, growth });
+    const quotes = {};
+    let failed = 0;
+    for (let i = 0; i < specs.length; i++) {
+      if (state.settings.symbol !== symbol || state.demoFeed || !pub.isOpen()) throw new Error("Market or public connection changed. Run the study again.");
+      status.textContent = "Reading current proposal " + (i + 1) + "/" + specs.length + " · public quotes only; historical payouts remain estimates.";
+      try {
+        const response = await pub.request(specs[i].request, 10000);
+        const quote = engine.quoteRecord(specs[i], response, Math.floor(Date.now() / 1000));
+        if (quote) quotes[quote.key] = quote;
+        else failed++;
+      } catch (error) {
+        failed++;
+        if (/ratelimit/i.test(String(error?.code))) { failed += specs.length - i - 1; break; }
+      }
+      await new Promise(resolve => setTimeout(resolve, 1100));
+    }
+    const report = engine.compare(data, quotes, options);
+    const body = $("research-body"); body.textContent = "";
+    const percentage = n => n == null ? "—" : (n * 100).toFixed(1) + "%";
+    const row = (target, values) => {
+      const tr = document.createElement("tr");
+      values.forEach(value => { const td = document.createElement("td"); td.textContent = String(value); tr.appendChild(td); });
+      target.appendChild(tr);
+    };
+    for (const candidate of report.rows) {
+      const r = candidate.holdout;
+      const be = r.quotedBreakEven ? percentage(r.quotedBreakEven[0]) + (Math.abs(r.quotedBreakEven[1] - r.quotedBreakEven[0]) > .0001 ? "–" + percentage(r.quotedBreakEven[1]) : "") : r.empiricalBreakEven == null ? "Not established" : percentage(r.empiricalBreakEven) + " (observed mix)";
+      row(body, [candidate.name, r.trades + " / " + percentage(r.winRate), fmtSigned(r.net),
+        (r.averageWin == null ? "—" : money(r.averageWin)) + " / " + (r.averageLoss == null ? "—" : money(r.averageLoss)),
+        be, money(r.maxDD), r.maxLossStreak, r.status + (r.unavailable ? " · " + r.unavailable + " unquoted signals" : "")]);
+    }
+    const staking = $("research-staking"); staking.textContent = "";
+    for (const r of report.staking) row(staking, [r.staking + (r.staking === "martingale3" ? " · RISK EXAMPLE" : ""), r.trades,
+      fmtSigned(r.net), money(r.maxDD), money(r.available), r.status]);
+    $("research-selection").textContent = report.selectionNote + " Staking reference: " + report.stakingReference + ". Selection never uses the held-out results. No strategy is promoted to the bot.";
+    $("research-caveat").textContent = report.caveat + " A maximum-duration buffer prevents contracts crossing evaluation boundaries; short phases can be too short for long contracts. Binary open positions are valued at cost, not an invented resale quote; their final P/L is unknown. Multiplier stops use observed prices and can slip beyond intended limits. Progressive stakes scale snapshot quotes approximately and may change real pricing. Paroli increases exposure after wins; Martingale increases it after losses and stops after three levels or insufficient funds.";
+    status.textContent = symbol + " · " + data.prices.length + " ticks · " + new Date(data.times[0] * 1000).toISOString() + " to " + new Date(data.times.at(-1) * 1000).toISOString() +
+      ". First 40% training (200-tick warm-up), next 20% validation, final 40% held out. " + failed + " unavailable quotes/models; no substitute payouts. All results use the separate virtual wallet.";
+    $("research-output").hidden = false;
+  } catch (error) { status.textContent = "Research stopped: " + errText(error); }
+  finally { button.disabled = false; }
 }
 
 /* ------------------------------ REST helpers ----------------------------- */
@@ -1025,6 +1096,9 @@ function applyDemoSnapshot(data, reset = false) {
   state.csrf = data.csrf;
   state.cred = { kind: "server" };
   state.accounts = data.accounts || [];
+  state.linkedAccounts = data.linked_accounts || [];
+  state.linkedAccountsTime = data.accounts_updated_at || null;
+  state.linkedAccountsError = data.accounts_error || null;
   state.account = data.connected ? data.account : null;
   state.owner = data.owner || null;
   state.activeId = data.account?.id || null;
@@ -1064,6 +1138,7 @@ function applyDemoSnapshot(data, reset = false) {
     renderStats(); renderHistory(); renderLastTrade();
   }
   renderAccount(); renderExecutionMode(); renderControls();
+  renderTicket(); renderDigitExplain();
 }
 
 async function connectWithToken() {
@@ -1092,6 +1167,7 @@ async function clearCred() {
   state.session = "done";
   state.cred = null; state.csrf = null; state.account = null; state.accounts = [];
   state.activeId = null; state.demo = null;
+  state.linkedAccounts = []; state.linkedAccountsTime = null; state.linkedAccountsError = null;
   state.sessionView = "disconnected"; // Reject an already in-flight pre-disconnect poll.
   ssSet(CRED_KEY, null); ssSet(ACTIVE_KEY, null);
   renderAccount(); renderControls();
@@ -1107,7 +1183,8 @@ function changeExecutionMode() {
   state.execution = el.value;
   state.session = "idle"; state.stats = freshStats(); state.history = []; state.lastResult = null;
   if (state.execution === "demo" && state.demo) applyDemoSnapshot({ connected: !!state.account, account: state.account,
-    accounts: state.accounts, owner: state.owner, csrf: state.csrf, run: state.demo, session_view: state.sessionView, revision: state.snapshotRevision });
+    accounts: state.accounts, linked_accounts: state.linkedAccounts, accounts_updated_at: state.linkedAccountsTime,
+    accounts_error: state.linkedAccountsError, owner: state.owner, csrf: state.csrf, run: state.demo, session_view: state.sessionView, revision: state.snapshotRevision });
   renderExecutionMode(); renderStrategy(); renderStats(); renderHistory(); renderLastTrade(); renderControls();
 }
 
@@ -1126,12 +1203,12 @@ async function startDemoSession() {
   if (state.demoBusy) return;
   if (!state.account?.isVirtual || state.account.currency !== "USD") return toast("Connect an authorised USD Demo account first.", "error");
   if (!liveSimulationReady()) return toast("Wait for live Deriv market data.", "error");
-  if (state.settings.autoDigit || state.settings.entryFilter) return toast("Experimental comparison filters remain simulation-only. Use manual settings for Demo execution.", "info");
+  if (state.settings.entryFilter) return toast("Experimental comparison filters remain simulation-only.", "info");
   state.demoBusy = true; renderControls();
   try {
     const s = state.settings;
     const data = state.demo?.status === "paused" ? await demoApi("/demo/control", "POST", { action: "resume" }) : await demoApi("/demo/start", "POST", {
-      symbol: s.symbol, product: s.product, stake: s.stake, digit: s.digit, growth: s.growth,
+      symbol: s.symbol, product: s.product, stake: s.stake, digit: s.digit, digit_mode: "cold50", growth: s.growth,
       mult: s.mult, direction: s.dir, target: s.target, max_loss: s.maxLoss, max_trades: s.maxTrades,
     });
     state.demoHalted = false;
@@ -1207,6 +1284,16 @@ function renderAll() {
 
 function renderAccount() {
   const acc = state.account;
+  const linked = $("linked-accounts-list");
+  linked.textContent = "";
+  $("linked-accounts").hidden = !state.linkedAccounts.length;
+  for (const account of state.linkedAccounts) {
+    const line = document.createElement("p");
+    line.textContent = account.id + " · " + (account.type === "real" ? "Real · view only" : "Demo") + " · " + money(account.balance, account.currency) + " " + account.currency;
+    linked.appendChild(line);
+  }
+  $("linked-accounts-time").textContent = (state.linkedAccountsError ? state.linkedAccountsError + " " : "") +
+    (state.linkedAccountsTime ? "Account-list snapshot: " + new Date(state.linkedAccountsTime * 1000).toLocaleTimeString() + ". Refreshes about every 30 seconds." : "");
   $("connect-button-nav").textContent = acc ? acc.id : state.cred ? "Connecting…" : "Connect";
   $("account-empty").hidden = !!acc;
   $("account-live").hidden = !acc;
@@ -1214,7 +1301,7 @@ function renderAccount() {
   sel.hidden = !(acc && state.accounts.length > 1);
   if (!acc) return;
   const cur = String(acc.currency).toUpperCase();
-  $("account-owner").textContent = state.owner || (acc.isVirtual ? "Demo trader" : "Account holder");
+  $("account-owner").textContent = state.owner || acc.id;
   $("currency-flag").innerHTML = FLAGS[cur] || "";
   $("currency-flag").hidden = !FLAGS[cur];
   $("balance-value").textContent = money(acc.balance, acc.currency);
@@ -1272,6 +1359,23 @@ function renderStrategy() {
 function renderTicket() {
   const s = state.settings;
   const stake = s.stake;
+  $("tk-payout-label").textContent = state.execution === "demo" ? "Return reference" : "Payout if win";
+  $("tk-profit-label").textContent = state.execution === "demo" ? "Profit reference" : "Profit if win";
+  if (state.execution === "demo") {
+    const last = state.demo?.pending || state.demo?.history?.[0];
+    const compatible = last && last.product === s.product && last.stake === stake && last.symbol === s.symbol;
+    const settledWin = compatible && last.status === "win" && last.sell_price > stake && last.profit > 0;
+    const payout = settledWin ? last.sell_price : last?.quoted_payout;
+    const profit = settledWin ? last.profit : last?.quoted_profit;
+    const quoted = compatible && Number.isFinite(payout) && payout > stake && profit > 0;
+    $("tk-stake").textContent = money(stake);
+    $("tk-loss").textContent = "−" + money(stake);
+    $("tk-payout").textContent = s.product === "differs" ? quoted ? money(payout) : "Quoted at entry" : "Variable";
+    $("tk-profit").textContent = s.product === "differs" ? quoted ? "+" + money(profit) : "Quoted at entry" : "10% target · not guaranteed";
+    $("tk-note").textContent = quoted ? (settledWin ? "Last actual winning settlement" : "Last authenticated entry quote") + " · digit " + last.digit + " · break-even " + (100 * stake / payout).toFixed(1) + "% wins · one full loss ≈ " + (stake / profit).toFixed(1) + " such wins. Future quotes and returns may differ." :
+      "Demo amounts come from the authenticated entry quote and actual Deriv settlement. Public quote estimates are not used here. Maximum contractual loss remains the stake.";
+    return;
+  }
   let payout, profit, note;
   if (s.product === "differs") {
     const q = differsMultiplier(s.digit);
@@ -1298,12 +1402,24 @@ function renderTicket() {
   $("tk-profit").textContent = "+" + money(profit);
   $("tk-loss").textContent = "−" + money(stake);
   $("tk-note").textContent = note;
-  if (state.execution === "demo") $("tk-note").textContent = "Preview estimate; execution uses the authenticated Demo quote. " + note;
 }
 
 function renderDigitExplain() {
   const s = state.settings;
   if (s.product !== "differs") return;
+  if (state.execution === "demo") {
+    const run = state.demo;
+    $("digit-explain").textContent = run?.digit_mode === "cold50" ? run.automatic_digit == null ?
+      "Collecting authenticated Demo ticks: " + (run.digit_observations || 0) + "/50. No entry until ready." :
+      "Last automatic Demo choice: avoid " + run.automatic_digit + ". Based on 50 past authenticated ticks, not a prediction." :
+      "A new Demo session uses automatic choice after 50 authenticated ticks. An existing fixed-digit contract keeps its original settings.";
+    return;
+  }
+  if (s.autoDigit) {
+    $("digit-explain").textContent = state.freqQueue.length < 50 ? "Collecting verified ticks: " + state.freqQueue.length + "/50. No entry until ready." :
+      "Automatic choice: avoid " + coldestDigit(state.freqQueue.slice(-50)) + " · previous 50 ticks. No proven predictive advantage.";
+    return;
+  }
   const d = s.digit;
   const total = state.freqQueue.length;
   $("digit-explain").textContent = total
@@ -1375,6 +1491,7 @@ function renderFreq() {
 function renderDigitPayouts() {
   for (let d = 0; d <= 9; d++) {
     const el = document.querySelector('[data-digit-pay="' + d + '"]');
+    if (!el) continue;
     const q = differsMultiplier(d);
     el.textContent = (q.live ? "" : "≈") + q.m.toFixed(3) + "×";
     el.classList.toggle("live", q.live);
@@ -1579,7 +1696,6 @@ function bindEvents() {
     const b = e.target.closest("[data-mult]");
     if (b) changeSetting({ mult: Number(b.dataset.mult) }, true);
   });
-  document.querySelectorAll(".digit").forEach((b) => on(b, "click", () => changeSetting({ digit: Number(b.dataset.digit) })));
   on("stake-input", "change", (e) => changeSetting({ stake: Number(e.target.value) || STAKE_MIN[state.settings.product] }, true));
   on("target-input", "change", (e) => changeSetting({ target: num(e.target.value, 0.01) }));
   on("maxloss-input", "change", (e) => changeSetting({ maxLoss: num(e.target.value, 0.01) }));
@@ -1587,6 +1703,7 @@ function bindEvents() {
   on("pause-btn", "click", pauseSession);
   on("stop-btn", "click", stopSession);
   on("lab-run-btn", "click", runComparison);
+  on("research-run", "click", runVirtualResearch);
   on("execution-mode", "change", changeExecutionMode);
 
   on("connect-button", "click", openConnectDialog);
@@ -1606,11 +1723,6 @@ function bindEvents() {
   });
   on("account-select", "change", (e) => switchAccount(e.target.value));
 
-  document.addEventListener("keydown", (e) => {
-    if ($("connect-dialog").open || state.settings.product !== "differs") return;
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-    if (/^[0-9]$/.test(e.key)) changeSetting({ digit: Number(e.key) });
-  });
 }
 
 /* ---------------------------------- init --------------------------------- */
