@@ -1,0 +1,1110 @@
+/**
+ * EazyXPro AI provider engine.
+ *
+ * This keeps the new Admin UI, but restores the original reliable request path:
+ * build the scanner prompt in /api/analyze, send multimodal AI SDK messages to an
+ * OpenAI-compatible provider, parse the text response, then persist the result.
+ */
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { generateText, type ModelMessage } from "ai";
+
+export type ProviderId =
+  | "bedrock"
+  | "openrouter"
+  | "gemini"
+  | "vertex"
+  | "claude"
+  | "openai"
+  | "deepseek"
+  | "grok"
+  | "replicate"
+  | "together"
+  | "edenai"
+  | "poe"
+  | "perplexity"
+  | "mistral"
+  | "groq"
+  | "azure-openai"
+  | "qwen"
+  | "llama"
+  | "openai-compatible";
+
+type ProviderStyle = "openai-compatible" | "bedrock" | "replicate" | "edenai";
+
+/** What the caller is asking the AI to do. The engine picks the model from this. */
+export type AiTask = "auto" | "vision" | "reasoning" | "document" | "fast";
+
+export interface ModelMeta {
+  id: string;
+  label: string;
+  stars: number;
+  speed: "Fast" | "Balanced" | "Slower";
+  reasoning: "Basic" | "Strong" | "Highest";
+  usage: string;
+}
+
+export interface ProviderDefinition {
+  id: ProviderId;
+  label: string;
+  baseURL: string;
+  defaultModel: string;
+  envKeys: string[];
+  docs: string;
+  costPerMillion: { input: number; output: number };
+  requiresBaseUrl?: boolean;
+  apiStyle?: ProviderStyle;
+  discoveryPath?: string;
+  productionModels?: string[];
+  /** Only visible providers are shown in the Admin UI. */
+  visible?: boolean;
+  /** Model chosen automatically per task. */
+  taskModels?: Partial<Record<Exclude<AiTask, "auto">, string>>;
+  modelMeta?: ModelMeta[];
+}
+
+const SEALED_PREFIX = "sealed:v1:";
+const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
+const OPENROUTER_PRODUCTION_MODELS = [
+  "openai/gpt-5.5",
+  "openai/gpt-5.2-pro",
+  "anthropic/claude-sonnet-4.6",
+  "anthropic/claude-opus-4.7",
+  "google/gemini-3.1-pro-preview",
+  "deepseek/deepseek-v4-pro",
+];
+
+const OPENROUTER_MODEL_META: ModelMeta[] = [
+  {
+    id: "openai/gpt-5.5",
+    label: "GPT-5.5",
+    stars: 5,
+    speed: "Balanced",
+    reasoning: "Highest",
+    usage: "Best overall — complex multi-timeframe analysis",
+  },
+  {
+    id: "openai/gpt-5.2-pro",
+    label: "GPT-5.2 Pro",
+    stars: 5,
+    speed: "Slower",
+    reasoning: "Highest",
+    usage: "Deep reasoning on long strategy documents",
+  },
+  {
+    id: "anthropic/claude-sonnet-4.6",
+    label: "Claude Sonnet",
+    stars: 4,
+    speed: "Fast",
+    reasoning: "Strong",
+    usage: "Fast chart vision and everyday scans",
+  },
+  {
+    id: "anthropic/claude-opus-4.7",
+    label: "Claude Opus",
+    stars: 5,
+    speed: "Slower",
+    reasoning: "Highest",
+    usage: "Hardest confluence checks",
+  },
+  {
+    id: "google/gemini-3.1-pro-preview",
+    label: "Gemini 3.1 Pro",
+    stars: 4,
+    speed: "Fast",
+    reasoning: "Strong",
+    usage: "Large context, images plus PDFs",
+  },
+  {
+    id: "deepseek/deepseek-v4-pro",
+    label: "DeepSeek V4 Pro",
+    stars: 3,
+    speed: "Fast",
+    reasoning: "Strong",
+    usage: "Cheapest capable option",
+  },
+];
+
+const GEMINI_MODEL_META: ModelMeta[] = [
+  {
+    id: "gemini-2.0-flash",
+    label: "Gemini 2.0 Flash",
+    stars: 4,
+    speed: "Fast",
+    reasoning: "Strong",
+    usage: "Recommended — fast chart vision",
+  },
+  {
+    id: "gemini-2.5-pro",
+    label: "Gemini 2.5 Pro",
+    stars: 5,
+    speed: "Slower",
+    reasoning: "Highest",
+    usage: "Powerful — deep analysis and long PDFs",
+  },
+  {
+    id: "gemini-2.5-flash",
+    label: "Gemini 2.5 Flash",
+    stars: 4,
+    speed: "Fast",
+    reasoning: "Strong",
+    usage: "Balanced everyday use",
+  },
+  {
+    id: "gemini-2.5-flash-lite",
+    label: "Gemini 2.5 Flash Lite",
+    stars: 3,
+    speed: "Fast",
+    reasoning: "Basic",
+    usage: "Cheapest — simple questions",
+  },
+];
+
+const BEDROCK_MODEL_META: ModelMeta[] = [
+  {
+    id: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    label: "Claude 3.5 Sonnet (Bedrock)",
+    stars: 4,
+    speed: "Balanced",
+    reasoning: "Strong",
+    usage: "Recommended emergency model",
+  },
+  {
+    id: "anthropic.claude-3-5-haiku-20241022-v1:0",
+    label: "Claude 3.5 Haiku (Bedrock)",
+    stars: 3,
+    speed: "Fast",
+    reasoning: "Basic",
+    usage: "Fast and cheap",
+  },
+  {
+    id: "amazon.nova-pro-v1:0",
+    label: "Amazon Nova Pro",
+    stars: 3,
+    speed: "Balanced",
+    reasoning: "Strong",
+    usage: "AWS-native alternative",
+  },
+];
+
+export const PROVIDER_CATALOG: ProviderDefinition[] = [
+  {
+    id: "openrouter",
+    label: "OpenRouter (primary)",
+    baseURL: "https://openrouter.ai/api/v1",
+    defaultModel: "openai/gpt-5.5",
+    envKeys: ["OPENROUTER_API_KEY"],
+    costPerMillion: { input: 1, output: 3 },
+    docs: "https://openrouter.ai/keys",
+    productionModels: OPENROUTER_PRODUCTION_MODELS,
+    visible: true,
+    modelMeta: OPENROUTER_MODEL_META,
+    taskModels: {
+      vision: "anthropic/claude-sonnet-4.6",
+      reasoning: "openai/gpt-5.5",
+      document: "google/gemini-3.1-pro-preview",
+      fast: "deepseek/deepseek-v4-pro",
+    },
+  },
+  {
+    id: "bedrock",
+    label: "AWS Bedrock (emergency)",
+    baseURL: "https://bedrock-runtime.{region}.amazonaws.com",
+    defaultModel: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    envKeys: ["AWS_ACCESS_KEY_ID"],
+    costPerMillion: { input: 3, output: 15 },
+    apiStyle: "bedrock",
+    docs: "https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids.html",
+    visible: true,
+    modelMeta: BEDROCK_MODEL_META,
+    taskModels: {
+      vision: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+      reasoning: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+      document: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+      fast: "anthropic.claude-3-5-haiku-20241022-v1:0",
+    },
+  },
+
+  {
+    id: "gemini",
+    label: "Google AI Studio (secondary)",
+    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+    defaultModel: DEFAULT_GEMINI_MODEL,
+    envKeys: ["GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"],
+    costPerMillion: { input: 0.1, output: 0.4 },
+    docs: "https://aistudio.google.com/apikey",
+    visible: true,
+    modelMeta: GEMINI_MODEL_META,
+    taskModels: {
+      vision: "gemini-2.0-flash",
+      reasoning: "gemini-2.5-pro",
+      document: "gemini-2.5-pro",
+      fast: "gemini-2.5-flash-lite",
+    },
+  },
+
+  {
+    id: "vertex",
+    label: "Google Vertex AI",
+    baseURL: "",
+    defaultModel: "google/gemini-2.0-flash",
+    envKeys: ["VERTEX_API_KEY", "GOOGLE_VERTEX_API_KEY"],
+    costPerMillion: { input: 0.1, output: 0.4 },
+    requiresBaseUrl: true,
+    docs: "https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library",
+  },
+  {
+    id: "claude",
+    label: "Anthropic",
+    baseURL: "https://api.anthropic.com/v1",
+    defaultModel: "claude-sonnet-4-5",
+    envKeys: ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY"],
+    costPerMillion: { input: 3, output: 15 },
+    docs: "https://console.anthropic.com/settings/keys",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    baseURL: "https://api.openai.com/v1",
+    defaultModel: "gpt-4o-mini",
+    envKeys: ["OPENAI_API_KEY"],
+    costPerMillion: { input: 0.15, output: 0.6 },
+    docs: "https://platform.openai.com/api-keys",
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    baseURL: "https://api.deepseek.com/v1",
+    defaultModel: "deepseek-chat",
+    envKeys: ["DEEPSEEK_API_KEY"],
+    costPerMillion: { input: 0.27, output: 1.1 },
+    docs: "https://platform.deepseek.com/api_keys",
+  },
+  {
+    id: "grok",
+    label: "Grok / xAI",
+    baseURL: "https://api.x.ai/v1",
+    defaultModel: "grok-4-fast",
+    envKeys: ["XAI_API_KEY", "GROK_API_KEY"],
+    costPerMillion: { input: 0.2, output: 0.5 },
+    docs: "https://console.x.ai",
+  },
+  {
+    id: "replicate",
+    label: "Replicate",
+    baseURL: "https://api.replicate.com/v1",
+    defaultModel: "meta/meta-llama-3.2-90b-vision-instruct",
+    envKeys: ["REPLICATE_API_TOKEN", "REPLICATE_API_KEY"],
+    costPerMillion: { input: 0.5, output: 0.5 },
+    apiStyle: "replicate",
+    docs: "https://replicate.com/account/api-tokens",
+  },
+  {
+    id: "together",
+    label: "Together AI",
+    baseURL: "https://api.together.xyz/v1",
+    defaultModel: "meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo",
+    envKeys: ["TOGETHER_API_KEY"],
+    costPerMillion: { input: 0.9, output: 0.9 },
+    docs: "https://api.together.xyz/settings/api-keys",
+  },
+  {
+    id: "edenai",
+    label: "Eden AI",
+    baseURL: "https://api.edenai.run/v2",
+    defaultModel: "openai/gpt-4o-mini",
+    envKeys: ["EDENAI_API_KEY", "EDEN_AI_API_KEY"],
+    costPerMillion: { input: 0.3, output: 0.9 },
+    apiStyle: "edenai",
+    docs: "https://app.edenai.run/user/api-settings",
+  },
+  {
+    id: "poe",
+    label: "Poe",
+    baseURL: "https://api.poe.com/v1",
+    defaultModel: "GPT-4o-mini",
+    envKeys: ["POE_API_KEY"],
+    costPerMillion: { input: 0.5, output: 1.5 },
+    docs: "https://creator.poe.com/docs/accessing-other-bots-on-poe",
+  },
+  {
+    id: "perplexity",
+    label: "Perplexity",
+    baseURL: "https://api.perplexity.ai",
+    defaultModel: "sonar-pro",
+    envKeys: ["PERPLEXITY_API_KEY"],
+    costPerMillion: { input: 1, output: 1 },
+    docs: "https://docs.perplexity.ai",
+  },
+  {
+    id: "mistral",
+    label: "Mistral",
+    baseURL: "https://api.mistral.ai/v1",
+    defaultModel: "pixtral-large-latest",
+    envKeys: ["MISTRAL_API_KEY"],
+    costPerMillion: { input: 2, output: 6 },
+    docs: "https://console.mistral.ai/api-keys",
+  },
+  {
+    id: "groq",
+    label: "Groq",
+    baseURL: "https://api.groq.com/openai/v1",
+    defaultModel: "meta-llama/llama-4-scout-17b-16e-instruct",
+    envKeys: ["GROQ_API_KEY"],
+    costPerMillion: { input: 0.11, output: 0.34 },
+    docs: "https://console.groq.com/keys",
+  },
+  {
+    id: "azure-openai",
+    label: "Azure OpenAI",
+    baseURL: "",
+    defaultModel: "gpt-4o-mini",
+    envKeys: ["AZURE_OPENAI_API_KEY"],
+    costPerMillion: { input: 0.15, output: 0.6 },
+    requiresBaseUrl: true,
+    docs: "https://learn.microsoft.com/azure/ai-services/openai/",
+  },
+  {
+    id: "qwen",
+    label: "Qwen",
+    baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    defaultModel: "qwen-vl-max",
+    envKeys: ["QWEN_API_KEY", "DASHSCOPE_API_KEY"],
+    costPerMillion: { input: 0.4, output: 1.2 },
+    docs: "https://dashscope.console.aliyun.com",
+  },
+  {
+    id: "llama",
+    label: "Llama compatible",
+    baseURL: "https://api.groq.com/openai/v1",
+    defaultModel: "llama-3.2-90b-vision-preview",
+    envKeys: ["LLAMA_API_KEY"],
+    costPerMillion: { input: 0.2, output: 0.6 },
+    docs: "https://console.groq.com/keys",
+  },
+  {
+    id: "openai-compatible",
+    label: "OpenAI Compatible API",
+    baseURL: "",
+    defaultModel: "",
+    envKeys: ["OPENAI_COMPATIBLE_API_KEY"],
+    costPerMillion: { input: 0.5, output: 1.5 },
+    requiresBaseUrl: true,
+    docs: "https://platform.openai.com/docs/api-reference",
+  },
+];
+
+export interface ProviderSettings {
+  enabled?: boolean;
+  apiKey?: string;
+  model?: string;
+  baseURL?: string;
+  /** True when a stored key exists but cannot be decrypted with the current secret. */
+  keyBroken?: boolean;
+}
+
+export interface AiConfig {
+  primary: ProviderId;
+  fallback?: ProviderId | "";
+  emergency?: ProviderId | "";
+  retries?: number;
+  providers: Partial<Record<ProviderId, ProviderSettings>>;
+}
+
+interface ResolvedProvider {
+  id: ProviderId;
+  model: string;
+  apiKey: string;
+  baseURL: string;
+  def: ProviderDefinition;
+  region?: string;
+}
+
+export interface RunAiOptions {
+  purpose: string;
+  userId?: string | null;
+  system?: string;
+  messages: ModelMessage[];
+  temperature?: number;
+  maxOutputTokens?: number;
+  config?: AiConfig;
+  /** Lets the engine pick the right model automatically for the job. */
+  task?: AiTask;
+  /** Overrides the resolved model for a single call. */
+  modelOverride?: string;
+}
+
+export interface RunAiResult {
+  text: string;
+  provider: ProviderId;
+  model: string;
+  attempts?: AiAttempt[];
+}
+
+export interface AiAttempt {
+  provider: string;
+  model: string;
+  status: string;
+  ms: number;
+  reason: string;
+}
+
+export class AiUnavailableError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly attempts: AiAttempt[],
+  ) {
+    super(message);
+    this.name = "AiUnavailableError";
+  }
+}
+
+export const DEFAULT_AI_CONFIG: AiConfig = {
+  primary: "openrouter",
+  fallback: "gemini",
+  emergency: "bedrock",
+  retries: 1,
+  providers: {},
+};
+
+/** Providers shown in Admin. Everything else stays supported but hidden. */
+export const VISIBLE_PROVIDERS = PROVIDER_CATALOG.filter((provider) => provider.visible);
+
+export function getProviderDefinition(id: string): ProviderDefinition | undefined {
+  return PROVIDER_CATALOG.find((provider) => provider.id === id);
+}
+
+function envValue(...names: string[]) {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function envKeyFor(def: ProviderDefinition) {
+  return envValue(...def.envKeys);
+}
+
+async function deriveSecretKey() {
+  const secret = envValue("AI_KEYS_ENCRYPTION_SECRET");
+  if (!secret) {
+    throw new Error(
+      "AI_KEYS_ENCRYPTION_SECRET is missing. Add one stable long random value to the server environment before saving provider keys.",
+    );
+  }
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+function toBase64(bytes: Uint8Array) {
+  return Buffer.from(bytes).toString("base64url");
+}
+
+function fromBase64(value: string) {
+  return new Uint8Array(Buffer.from(value, "base64url"));
+}
+
+async function encryptSecret(value?: string) {
+  if (!value || value.startsWith(SEALED_PREFIX)) return value || "";
+  const key = await deriveSecretKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(value),
+  );
+  return `${SEALED_PREFIX}${toBase64(iv)}.${toBase64(new Uint8Array(cipher))}`;
+}
+
+async function decryptSecret(value?: string) {
+  if (!value) return "";
+  if (!value.startsWith(SEALED_PREFIX)) return value;
+  try {
+    const key = await deriveSecretKey();
+    const [ivRaw, cipherRaw] = value.slice(SEALED_PREFIX.length).split(".");
+    if (!ivRaw || !cipherRaw) throw new Error("Invalid encrypted key format");
+    const plain = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: fromBase64(ivRaw) },
+      key,
+      fromBase64(cipherRaw),
+    );
+    return new TextDecoder().decode(plain);
+  } catch (error) {
+    console.error("[ai] stored provider key could not be decrypted", error);
+    return "";
+  }
+}
+
+async function decryptConfigSecrets(config: AiConfig) {
+  await Promise.all(
+    Object.values(config.providers ?? {}).map(async (settings) => {
+      if (!settings?.apiKey) return;
+      const sealed = settings.apiKey.startsWith(SEALED_PREFIX);
+      const plain = await decryptSecret(settings.apiKey);
+      settings.apiKey = plain;
+      // A sealed value that will not open means the encryption secret changed.
+      // Say so instead of silently showing "no key stored".
+      settings.keyBroken = sealed && !plain;
+    }),
+  );
+  return config;
+}
+
+async function encryptConfigSecrets(config: AiConfig) {
+  const copy: AiConfig = { ...config, providers: { ...(config.providers ?? {}) } };
+  await Promise.all(
+    Object.entries(copy.providers).map(async ([id, settings]) => {
+      if (!settings) return;
+      const { keyBroken: _keyBroken, ...rest } = settings;
+      copy.providers[id as ProviderId] = {
+        ...rest,
+        apiKey: await encryptSecret(settings.apiKey),
+      };
+    }),
+  );
+  return copy;
+}
+
+function normalizeModel(id: ProviderId, model: string) {
+  if (id === "gemini" && model === "gemini-2.5-flash") return DEFAULT_GEMINI_MODEL;
+  if (id === "openrouter" && model === "google/gemini-2.0-flash-001") {
+    return "google/gemini-3.1-pro-preview";
+  }
+  return model;
+}
+
+export async function loadAiConfig(): Promise<AiConfig> {
+  try {
+    const { supabaseAdmin: raw } = await import("@/integrations/supabase/client.server");
+    const supabaseAdmin = raw as any;
+    const { data, error } = await supabaseAdmin
+      .from("app_settings")
+      .select("ai_providers, gemini_api_key, gemini_model")
+      .eq("id", "default")
+      .maybeSingle();
+    if (error) throw error;
+
+    const stored = (data?.ai_providers ?? {}) as Partial<AiConfig>;
+    const config: AiConfig = {
+      ...DEFAULT_AI_CONFIG,
+      ...stored,
+      providers: { ...(stored.providers ?? {}) },
+    };
+    if (!config.providers.gemini?.apiKey && data?.gemini_api_key) {
+      config.providers.gemini = {
+        ...config.providers.gemini,
+        enabled: true,
+        apiKey: data.gemini_api_key,
+        model: config.providers.gemini?.model || data.gemini_model || DEFAULT_GEMINI_MODEL,
+      };
+    }
+    return decryptConfigSecrets(config);
+  } catch (error) {
+    console.error("[ai] failed to load provider config", error);
+    return { ...DEFAULT_AI_CONFIG, providers: {} };
+  }
+}
+
+/** Writes the config, then reads it back so callers always show what is really stored. */
+export async function saveAiConfig(config: AiConfig): Promise<AiConfig> {
+  const { supabaseAdmin: raw } = await import("@/integrations/supabase/client.server");
+  const supabaseAdmin = raw as any;
+  const encrypted = await encryptConfigSecrets({
+    ...DEFAULT_AI_CONFIG,
+    ...config,
+    providers: { ...(config.providers ?? {}) },
+  });
+  const { error } = await supabaseAdmin.from("app_settings").upsert(
+    {
+      id: "default",
+      ai_providers: encrypted,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "id" },
+  );
+  if (error) throw new Error(`AI settings were not saved: ${error.message}`);
+  const stored = await loadAiConfig();
+  if (stored.primary !== (config.primary ?? DEFAULT_AI_CONFIG.primary)) {
+    throw new Error("AI settings did not persist. Check the database connection and try again.");
+  }
+  for (const [provider, settings] of Object.entries(config.providers ?? {})) {
+    if (!settings?.apiKey) continue;
+    const savedSettings = stored.providers?.[provider as ProviderId];
+    if (!savedSettings?.apiKey || savedSettings.keyBroken) {
+      throw new Error(
+        `The ${provider} key could not be verified after saving. Keep AI_KEYS_ENCRYPTION_SECRET unchanged, then enter the key again.`,
+      );
+    }
+  }
+  return stored;
+}
+
+function parseBedrockCredentials(value: string) {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const json = JSON.parse(trimmed) as { accessKeyId?: string; secretAccessKey?: string };
+      if (json.accessKeyId && json.secretAccessKey) return json;
+    } catch {
+      return null;
+    }
+  }
+  const [accessKeyId, ...secretParts] = trimmed.split(":");
+  const secretAccessKey = secretParts.join(":");
+  if (accessKeyId && secretAccessKey) return { accessKeyId, secretAccessKey };
+  const envAccessKeyId = envValue("AWS_ACCESS_KEY_ID");
+  const envSecretAccessKey = envValue("AWS_SECRET_ACCESS_KEY");
+  if (envAccessKeyId && envSecretAccessKey) {
+    return { accessKeyId: envAccessKeyId, secretAccessKey: envSecretAccessKey };
+  }
+  return null;
+}
+
+export function resolveProvider(
+  id: ProviderId,
+  config: AiConfig,
+  task: AiTask = "auto",
+): ResolvedProvider | null {
+  const def = getProviderDefinition(id);
+  if (!def) return null;
+  const settings = config.providers?.[id] ?? {};
+  if (settings.enabled === false) return null;
+  const apiKey = settings.apiKey?.trim() || envKeyFor(def);
+  if (!apiKey) return null;
+
+  const region =
+    id === "bedrock"
+      ? settings.baseURL?.trim() || envValue("AWS_REGION", "AWS_DEFAULT_REGION") || "us-east-1"
+      : undefined;
+  const configuredBase = settings.baseURL?.trim() || def.baseURL;
+  const baseURL =
+    id === "bedrock" ? def.baseURL.replace("{region}", region ?? "us-east-1") : configuredBase;
+  if (!baseURL) return null;
+
+  // Intelligent selection: a task-specific model wins, otherwise the admin's pick.
+  const taskModel = task !== "auto" ? def.taskModels?.[task] : "";
+  let chosen = taskModel || settings.model?.trim() || envModelFor(id) || def.defaultModel;
+  // Production-only guard: never run a non-production model on a production provider.
+  if (def.productionModels?.length && !def.productionModels.includes(normalizeModel(id, chosen))) {
+    chosen = def.defaultModel;
+  }
+
+
+  return {
+    id,
+    model: normalizeModel(id, chosen),
+    apiKey,
+    baseURL,
+    def,
+    region,
+  };
+}
+
+/** Models tried inside one provider before moving to the next provider. */
+function modelCandidates(provider: ResolvedProvider) {
+  const known = provider.def.productionModels ?? provider.def.modelMeta?.map((m) => m.id) ?? [];
+  return [provider.model, ...known.filter((model) => model !== provider.model)].slice(0, 3);
+}
+
+function envModelFor(id: ProviderId) {
+  if (id === "gemini") return envValue("GEMINI_MODEL") || DEFAULT_GEMINI_MODEL;
+  if (id === "openrouter") return envValue("OPENROUTER_MODEL");
+  if (id === "bedrock") return envValue("AWS_BEDROCK_MODEL", "BEDROCK_MODEL");
+  return "";
+}
+
+export function buildChain(config: AiConfig, task: AiTask = "auto"): ResolvedProvider[] {
+  const ordered: ProviderId[] = [];
+  for (const id of [config.primary, config.fallback, config.emergency]) {
+    if (id && !ordered.includes(id)) ordered.push(id);
+  }
+  // Any other configured provider becomes a last-resort link in the chain.
+  for (const id of Object.keys(config.providers ?? {}) as ProviderId[]) {
+    if (!ordered.includes(id)) ordered.push(id);
+  }
+  return ordered
+    .map((id) => resolveProvider(id, config, task))
+    .filter((provider): provider is ResolvedProvider => Boolean(provider));
+}
+
+function statusOf(error: unknown): number | undefined {
+  const err = error as {
+    statusCode?: number;
+    status?: number;
+    response?: { status?: number };
+    lastError?: { statusCode?: number };
+  };
+  return err?.statusCode ?? err?.status ?? err?.response?.status ?? err?.lastError?.statusCode;
+}
+
+function friendlyError(error: unknown) {
+  const status = statusOf(error);
+  const raw = (error as Error)?.message || "Unknown provider error";
+  const lower = raw.toLowerCase();
+  if (status === 401 || lower.includes("api key")) return "Invalid API key.";
+  if (status === 403 || lower.includes("forbidden")) {
+    return "Provider access is forbidden. Check key restrictions, billing, region, and model access.";
+  }
+  if (status === 404 || lower.includes("model") || lower.includes("not found")) {
+    return "Model unavailable. Choose a model this key can access.";
+  }
+  if (status === 429 || lower.includes("quota") || lower.includes("rate")) {
+    return "Quota or rate limit reached. Add credits, wait, or switch providers.";
+  }
+  if (lower.includes("timeout")) return "Network timeout. Provider did not answer fast enough.";
+  return `Provider error ${status ?? "ERR"}.`;
+}
+
+function normalizeMessagesForOriginalPath(messages: ModelMessage[]): ModelMessage[] {
+  return messages.map((message) => {
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) return message;
+    return {
+      ...message,
+      content: content.map((part) => {
+        if (!part || typeof part !== "object") return part;
+        const value = part as Record<string, unknown>;
+        if (value.type === "file" && typeof value.data === "string") {
+          const mediaType = String(value.mediaType || "");
+          if (mediaType.startsWith("image/") || value.data.startsWith("data:image/")) {
+            return { type: "image", image: value.data };
+          }
+        }
+        return part;
+      }),
+    } as ModelMessage;
+  });
+}
+
+async function logAttempt(entry: Record<string, unknown>) {
+  try {
+    const { supabaseAdmin: raw } = await import("@/integrations/supabase/client.server");
+    const supabaseAdmin = raw as any;
+    await supabaseAdmin.from("ai_logs").insert(entry);
+  } catch (error) {
+    console.error("[ai] log write failed", error);
+  }
+}
+
+async function callOpenAiCompatible(provider: ResolvedProvider, options: RunAiOptions) {
+  const client = createOpenAICompatible({
+    name: "eazyxpro-ai",
+    apiKey: provider.apiKey,
+    baseURL: provider.baseURL,
+    supportsStructuredOutputs: false,
+  });
+  return generateText({
+    model: client(provider.model),
+    system: options.system,
+    temperature: options.temperature,
+    maxOutputTokens: options.maxOutputTokens,
+    messages: normalizeMessagesForOriginalPath(options.messages),
+    maxRetries: 0,
+  });
+}
+
+async function callBedrock(provider: ResolvedProvider, options: RunAiOptions) {
+  const creds = parseBedrockCredentials(provider.apiKey);
+  if (!creds?.accessKeyId || !creds?.secretAccessKey) {
+    throw new Error(
+      "AWS Bedrock needs AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in the environment, or an Admin key formatted as ACCESS_KEY_ID:SECRET_ACCESS_KEY.",
+    );
+  }
+
+  const { callBedrockConverse } = await import("@/lib/bedrock.server");
+  return callBedrockConverse({
+    accessKeyId: creds.accessKeyId,
+    secretAccessKey: creds.secretAccessKey,
+    sessionToken: envValue("AWS_SESSION_TOKEN") || undefined,
+    region: provider.region || envValue("AWS_REGION", "AWS_DEFAULT_REGION") || "us-east-1",
+    modelId: provider.model,
+    system: options.system,
+    messages: options.messages,
+    temperature: options.temperature,
+    maxOutputTokens: options.maxOutputTokens,
+  });
+}
+
+
+export async function runAi(options: RunAiOptions): Promise<RunAiResult> {
+  const config = options.config ?? (await loadAiConfig());
+  const chain = buildChain(config, options.task ?? "auto");
+  if (!chain.length) {
+    throw new AiUnavailableError(
+      "No AI provider is configured. Add a provider in Admin → AI Management, or set a provider API key in Render Environment Variables.",
+      503,
+      [],
+    );
+  }
+
+  const retries = Math.max(0, Math.min(2, config.retries ?? 0));
+  const attempts: AiAttempt[] = [];
+  let lastStatus = 503;
+
+  for (const link of chain) {
+    // Model-level failover first, then provider-level failover.
+    const candidates = options.modelOverride ? [options.modelOverride] : modelCandidates(link);
+    let modelFailover = false;
+    for (const model of candidates) {
+      const provider: ResolvedProvider = { ...link, model };
+      for (let attempt = 1; attempt <= retries + 1; attempt++) {
+        const started = Date.now();
+        try {
+          const result =
+            provider.def.apiStyle === "bedrock"
+              ? await callBedrock(provider, options)
+              : await callOpenAiCompatible(provider, options);
+          const ms = Date.now() - started;
+          const inputTokens = result.usage?.inputTokens ?? 0;
+          const outputTokens = result.usage?.outputTokens ?? 0;
+          void logAttempt({
+            user_id: options.userId ?? null,
+            purpose: options.purpose,
+            provider: provider.id,
+            model: provider.model,
+            success: true,
+            response_ms: ms,
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            estimated_cost:
+              (inputTokens / 1_000_000) * provider.def.costPerMillion.input +
+              (outputTokens / 1_000_000) * provider.def.costPerMillion.output,
+            attempt,
+          });
+          return { text: result.text, provider: provider.id, model: provider.model, attempts };
+        } catch (error) {
+          const ms = Date.now() - started;
+          const status = statusOf(error);
+          lastStatus = status ?? lastStatus;
+          const reason = friendlyError(error).slice(0, 700);
+          attempts.push({
+            provider: provider.id,
+            model: provider.model,
+            status: String(status ?? "ERR"),
+            ms,
+            reason,
+          });
+          void logAttempt({
+            user_id: options.userId ?? null,
+            purpose: options.purpose,
+            provider: provider.id,
+            model: provider.model,
+            success: false,
+            failure_reason: reason,
+            response_ms: ms,
+            attempt,
+          });
+          // A missing/blocked model is worth another model; a bad key is not.
+          if (status && [400, 404].includes(status)) {
+            modelFailover = true;
+            break;
+          }
+          if (status && [401, 403].includes(status)) {
+            modelFailover = false;
+            break;
+          }
+        }
+      }
+      if (!modelFailover) break;
+      modelFailover = false;
+    }
+  }
+
+  const details = attempts
+    .map((item) => `${item.provider} (${item.model}) → ${item.reason}`)
+    .join("\n");
+  throw new AiUnavailableError(
+    `All AI providers failed.\n${details || "No provider attempts were available."}`,
+    lastStatus,
+    attempts,
+  );
+}
+
+export async function AnalyzeChart(options: Omit<RunAiOptions, "purpose">): Promise<RunAiResult> {
+  return runAi({ task: "vision", ...options, purpose: "chart_analysis" });
+}
+
+/** Rolling health snapshot per provider, used by the Admin dashboard. */
+export async function getAiHealth() {
+  try {
+    const { supabaseAdmin: raw } = await import("@/integrations/supabase/client.server");
+
+    const supabaseAdmin = raw as any;
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data } = await supabaseAdmin
+      .from("ai_logs")
+      .select("provider, model, success, response_ms, estimated_cost, created_at")
+      .gte("created_at", since)
+      .limit(1000);
+    const rows = (data ?? []) as Array<{
+      provider: string | null;
+      success: boolean;
+      response_ms: number | null;
+      estimated_cost: number | null;
+    }>;
+    const byProvider: Record<string, { requests: number; ok: number; ms: number; cost: number }> =
+      {};
+    for (const row of rows) {
+      const key = row.provider ?? "unknown";
+      byProvider[key] ??= { requests: 0, ok: 0, ms: 0, cost: 0 };
+      byProvider[key].requests += 1;
+      if (row.success) byProvider[key].ok += 1;
+      byProvider[key].ms += row.response_ms ?? 0;
+      byProvider[key].cost += Number(row.estimated_cost ?? 0);
+    }
+    return Object.entries(byProvider).map(([provider, stat]) => ({
+      provider,
+      requests: stat.requests,
+      successRate: stat.requests ? Math.round((stat.ok / stat.requests) * 100) : 0,
+      avgMs: stat.requests ? Math.round(stat.ms / stat.requests) : 0,
+      cost: Number(stat.cost.toFixed(4)),
+      health:
+        stat.requests === 0 ? "Unknown" : stat.ok / stat.requests >= 0.8 ? "Healthy" : "Degraded",
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function providerFetch(provider: ResolvedProvider, path: string) {
+  return fetch(`${provider.baseURL.replace(/\/$/, "")}${path}`, {
+    headers: { Authorization: `Bearer ${provider.apiKey}`, Accept: "application/json" },
+    signal: AbortSignal.timeout(10_000),
+  });
+}
+
+function modelId(model: unknown) {
+  if (!model || typeof model !== "object") return "";
+  const row = model as { id?: string; name?: string };
+  return row.id || row.name || "";
+}
+
+function productionModelFilter(def: ProviderDefinition, models: string[]) {
+  if (!def.productionModels?.length) return models;
+  const available = new Set(models);
+  return def.productionModels.filter((model) => available.has(model));
+}
+
+function recommendModel(def: ProviderDefinition, models: string[]) {
+  if (def.productionModels?.length) return models[0] || def.defaultModel;
+  const vision = models.find((model) =>
+    /vision|vl|gpt-4o|gemini|claude|llama-4|pixtral|qwen/i.test(model),
+  );
+  return vision || models[0] || def.defaultModel;
+}
+
+export async function discoverProviderModels(id: ProviderId, override?: ProviderSettings) {
+  const config = await loadAiConfig();
+  if (override) {
+    config.providers = {
+      ...config.providers,
+      [id]: { ...config.providers?.[id], ...override, enabled: true },
+    };
+  }
+  const resolved = resolveProvider(id, config);
+  if (!resolved) return { ok: false, models: [], error: "Missing API key, model, or base URL." };
+  const started = Date.now();
+  try {
+    if (resolved.def.apiStyle === "bedrock") {
+      const models = [
+        "anthropic.claude-3-5-sonnet-20240620-v1:0",
+        "anthropic.claude-3-5-haiku-20241022-v1:0",
+        "amazon.nova-pro-v1:0",
+        "amazon.nova-lite-v1:0",
+        "meta.llama3-2-90b-instruct-v1:0",
+      ];
+      return {
+        ok: true,
+        provider: resolved.id,
+        models,
+        recommendedModel: resolved.model || models[0],
+        capabilities: { vision: true, pdf: false, chat: true, streaming: true },
+        ms: Date.now() - started,
+        note: "For Admin key storage use ACCESS_KEY_ID:SECRET_ACCESS_KEY, and put the AWS region in Base URL/Region.",
+      };
+    }
+    const res = await providerFetch(resolved, resolved.def.discoveryPath || "/models");
+    if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 300)}`);
+    const json = (await res.json()) as {
+      data?: unknown[];
+      results?: unknown[];
+      models?: unknown[];
+    };
+    const rawRows = json.data ?? json.results ?? json.models ?? [];
+    const discovered = rawRows.map(modelId).filter(Boolean);
+    const models = productionModelFilter(resolved.def, discovered).slice(0, 80);
+    const joined = models.join(" ").toLowerCase();
+    return {
+      ok: true,
+      provider: resolved.id,
+      models,
+      recommendedModel: recommendModel(resolved.def, models),
+      capabilities: {
+        vision: /vision|vl|gpt-4o|gemini|claude|llama-4|pixtral|qwen/.test(joined),
+        pdf: /gemini|claude|document|pdf/.test(joined),
+        chat: models.length > 0,
+        streaming: true,
+      },
+      ms: Date.now() - started,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      provider: resolved.id,
+      models: [],
+      ms: Date.now() - started,
+      error: friendlyError(error),
+    };
+  }
+}
+
+export async function testProvider(id: ProviderId, override?: ProviderSettings) {
+  const discovered = await discoverProviderModels(id, override);
+  const config = await loadAiConfig();
+  if (override) {
+    config.providers = {
+      ...config.providers,
+      [id]: { ...config.providers?.[id], ...override, enabled: true },
+    };
+  }
+  const resolved = resolveProvider(id, config);
+  if (!resolved) return { ok: false, error: "Missing API key, model, or base URL." };
+  const started = Date.now();
+  try {
+    const result = await runAi({
+      purpose: "provider_test",
+      config: {
+        ...DEFAULT_AI_CONFIG,
+        primary: id,
+        fallback: "",
+        emergency: "",
+        retries: 0,
+        providers: { [id]: { ...config.providers[id], ...override, enabled: true } },
+      },
+      messages: [{ role: "user", content: "Reply with the single word: OK" }],
+      maxOutputTokens: 16,
+    });
+    return {
+      ok: true,
+      provider: id,
+      model: result.model,
+      detectedModel: discovered.recommendedModel || result.model,
+      models: discovered.models ?? [],
+      capabilities: discovered.capabilities ?? { vision: false, chat: true, streaming: true },
+      ms: Date.now() - started,
+      reply: result.text.trim().slice(0, 120),
+      status: "Connected",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      provider: id,
+      model: resolved.model,
+      models: discovered.models ?? [],
+      ms: Date.now() - started,
+      error: error instanceof AiUnavailableError ? error.message : friendlyError(error),
+      attempts: error instanceof AiUnavailableError ? error.attempts : undefined,
+    };
+  }
+}

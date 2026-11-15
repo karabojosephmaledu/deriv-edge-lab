@@ -25,6 +25,7 @@ from routers.deriv import router as deriv_router
 from routers import deriv as deriv_module
 from routers.account_view import router as account_view_router
 from routers import account_display
+from routers import chart_auto
 
 
 # Startup runs before the yield, shutdown after it. Add your own setup/teardown here.
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI):
     app.state.index_task = asyncio.create_task(ensure_indexes())  # background: a big index build must not block boot
     display_cleanup = asyncio.create_task(account_display.cleanup_loop())
     yield
+    await chart_auto.runtime.shutdown()
     display_cleanup.cancel()
     with suppress(asyncio.CancelledError):
         await display_cleanup
@@ -99,6 +101,7 @@ async def get_status_checks():
 
 # Resource routers (each exports its own APIRouter)
 api_router.include_router(deriv_router)
+api_router.include_router(chart_auto.router)
 api_router.include_router(account_view_router)
 api_router.include_router(account_display.router)
 
