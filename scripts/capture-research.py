@@ -18,6 +18,18 @@ ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {"ticks_history", "proposal", "contracts_for"}
 
 
+def public_payload(payload):
+    """Also validate requests loaded from a saved snapshot during retries."""
+    operations = set(payload) & ALLOWED
+    fields = {"ticks_history": {"ticks_history", "start", "end", "count", "style"},
+              "contracts_for": {"contracts_for", "currency"},
+              "proposal": {"proposal", "amount", "basis", "currency", "underlying_symbol", "contract_type",
+                           "barrier", "duration", "duration_unit", "growth_rate", "multiplier"}}
+    if len(operations) != 1 or set(payload) - (fields[next(iter(operations))] | {"req_id"}):
+        raise ValueError("Only read-only public research requests are permitted")
+    return payload
+
+
 async def capture(path):
     output = {"source": PUBLIC, "captured_at": int(time.time()),
               "note": "Public data only. Quote snapshots are current, not historical executable payouts.", "markets": []}
@@ -25,8 +37,7 @@ async def capture(path):
     async with connect(PUBLIC, open_timeout=15, max_size=4 * 1024 * 1024) as socket:
         async def request(payload):
             nonlocal seq
-            if not (set(payload) & ALLOWED) or set(payload) & {"buy", "sell", "authorize", "contract_update"}:
-                raise ValueError("Only read-only public research requests are permitted")
+            public_payload(payload)
             seq += 1
             await socket.send(json.dumps({**payload, "req_id": seq}))
             while True:
@@ -84,7 +95,7 @@ async def retry_unavailable(path):
                     if not row.get("error"):
                         continue
                     count += 1
-                    await socket.send(json.dumps({**row["spec"]["request"], "req_id": count}))
+                    await socket.send(json.dumps({**public_payload(row["spec"]["request"]), "req_id": count}))
                     r = json.loads(await asyncio.wait_for(socket.recv(), 25))
                     row["capturedAt"] = int(time.time())
                     if r.get("error"):

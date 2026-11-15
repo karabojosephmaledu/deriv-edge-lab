@@ -107,7 +107,7 @@ Official references checked:
 
 ## Tests and reproduction
 
-The review run passed **95 Node checks and 42 Python checks (137 total)**. Coverage includes the existing six simulation-integrity fixes, payout/commission/precision regressions, cold-50 warm-up on both sides, server-side Demo selection, unknown/missing tick rejection, no future data in validation selection, funding/ledger reconciliation, staking exposure, realistic stop overshoots, actual-settlement ticket display, desktop/mobile research UI, account-view refresh failures and existing OAuth/CSRF protections. All order-path tests use mocks. New production account viewing and automatic Demo choice still require acceptance after an approved deployment.
+The review run passed **95 Node checks and 47 Python checks (142 total)**. Coverage includes the existing six simulation-integrity fixes, payout/commission/precision regressions, cold-50 warm-up on both sides, server-side Demo selection, unknown/missing tick rejection, no future data in validation selection, funding/ledger reconciliation, staking exposure, realistic stop overshoots, actual-settlement ticket display, desktop/mobile research UI, account-view refresh failures, a public-read allowlist covering saved-snapshot retries, and existing OAuth/CSRF protections. All order-path tests use mocks. New production account viewing and automatic Demo choice still require acceptance after an approved deployment.
 
 Offline reproduction using the current dependencies:
 

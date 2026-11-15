@@ -210,6 +210,20 @@ def test_research_update_keeps_demo_settlement_and_session_limit_calculations_un
         assert inspect.getsource(getattr(Broker, name)).strip() == ast.get_source_segment(original, node).strip()
 
 
+@pytest.mark.parametrize("operation", ["buy", "sell", "authorize", "contract_update", "cashier"])
+def test_public_capture_retries_cannot_import_order_or_account_requests_from_a_snapshot(operation):
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[2] / "scripts" / "capture-research.py"
+    spec = importlib.util.spec_from_file_location("research_capture", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    proposal = {"proposal": 1, "amount": 1, "basis": "stake", "currency": "USD", "contract_type": "DIGITDIFF"}
+    assert module.public_payload(proposal) == proposal
+    with pytest.raises(ValueError):
+        module.public_payload({**proposal, operation: 1})
+
+
 @pytest.mark.asyncio
 async def test_real_account_and_real_socket_are_rejected_before_connect_or_buy():
     b = FakeBroker()
