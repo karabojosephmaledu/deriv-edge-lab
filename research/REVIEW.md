@@ -1,6 +1,6 @@
 # Deriv Edge Lab — research and account review
 
-This branch is a review candidate. It has not been merged or deployed. The live website remains at PR #4. Existing Demo contracts are separate from all new virtual comparisons.
+This is the safe website/research foundation in revised PR #5. Experimental execution changes have been removed and isolated for separate review. Demo configuration, entry selection, settlement and session limits retain their existing behaviour. This branch is a review candidate. It has not been merged or deployed. The live website remains at PR #4. Existing Demo contracts are separate from all new virtual comparisons.
 
 ## What was wrong
 
@@ -19,8 +19,8 @@ The account dialog also incorrectly said credentials stayed in the browser and t
 | Existing official Deriv login/callback | Preserved; public configuration and Demo enablement verified live. The user reported successful authorised Demo contracts and balance changes. No independent login or broker-statement check using the user's credentials was performed. |
 | Demo and Real account identification, balances and currencies | Added a REST-only, timestamped list of authorised active accounts, refreshed about every 30 seconds. Real accounts never become execution selections. |
 | Secure credentials and clear connection button | Preserved server-side credentials, HttpOnly cookie, CSRF and origin checks. Corrected stale instructions and added an independent Deriv portal tab link. |
-| Manual digit selector removed | Removed the ten clickable digit buttons and numeric keyboard selection. |
-| Automatic digit choice | Added a 50-tick least-frequency rule, lowest-digit tie break, and a visible warm-up/choice status. Demo uses authenticated backend ticks and verified precision; the browser cannot supply the chosen digit for this mode. No entry before 50 observations. This is an experimental heuristic, not a proven predictor. |
+| Manual Demo digit controls | Preserved, as required to keep research automatic selection out of account execution. |
+| Automatic digit choice | Research comparisons only. No automatic policy field, warm-up logic or selection is available to the Demo order route. Experimental execution work is quarantined separately and not ready for approval. |
 | Digit Differs research | Fixed, seeded-random, cold-25 and cold-50 references. |
 | Over/Under research | Over 1, Under 8, and the prior-two-0/1-digits filter compared with unfiltered references. |
 | Rise/Fall research | Five-tick CALL/PUT with EMA 9/21 and EMA 20 + Wilder RSI 14. Plain-contract ties lose; allow-equals contracts are not silently substituted. |
@@ -32,7 +32,7 @@ The account dialog also incorrectly said credentials stayed in the browser and t
 | Small virtual wallets | $1, $2.50, $5, $8, $10 and larger balances. Reserve stakes, refuse insufficient funds, respect configured contract floors, never create credit or silently raise a subminimum stake. |
 | Session targets/loss limits | Independent research limits, with full-stake exposure checked before entry. Existing Demo/session safeguards preserved. |
 | Unseen data and payout provenance | Dated public snapshots, fixed training/validation/holdout split, next-tick simulated fills, boundary buffers, current-versus-historical quote distinction, recorded missing models. |
-| Preserve design and working strategies | Existing layout/palette/live feed preserved; the optional comparison panel grows. Existing settlement/payout mathematics is unchanged; automatic digit selection is an intentional entry-policy change requested by the user. |
+| Preserve design and working strategies | Existing layout/palette/live feed preserved; the optional comparison panel grows. Existing settlement/payout mathematics is unchanged; Demo entry configuration and manual selection are unchanged; virtual candidates cannot select an account trade. |
 | Tested, pushed, PR | See the PR validation section. All new work awaits merge/deployment approval. |
 | Proven profitable strategy | **Not established.** No model is automatically promoted from a favourable backtest to account execution. |
 | Three months of forward testing | **Not completed.** Requires new observations over time; historical replay cannot substitute for it. |
@@ -46,7 +46,7 @@ All indicators and digit counts use only prices already observed at the signal. 
 
 Each dated 1,000-tick window uses the first 40% for training references (after a 200-tick warm-up), the next 20% for validation, and the final 40% as held out. Candidate settings were fixed before inspecting outcomes. A conservative maximum-duration buffer stops contracts crossing phase boundaries; long-duration contracts may have too little validation data in these short windows. No hidden forced closing at a boundary creates a winning result.
 
-The comparison can identify a candidate using validation only: at least 30 completed trades, positive net P/L, no unresolved validation position, and observed drawdown at most 25% of the virtual starting balance. These are screening criteria, not statistical proof. The held-out results never choose the candidate. A failure to qualify produces an abstention message. Displayed alternatives remain research references and do not change the live account's strategy.
+The comparison can identify a candidate using validation only: at least 30 completed trades, positive net P/L, no unresolved validation position, and observed drawdown at most 25% of the virtual starting balance. These are screening criteria, not statistical proof. The held-out results never choose the candidate. A failure to qualify produces an explicit NO TRADE result with no selected strategy, fallback or staking projection. Displayed alternatives remain research references and do not change the live account's strategy.
 
 Binary gross returns are rounded to cents before net profit and break-even calculations. Different stakes use snapshot payout ratios approximately; progressive stakes may have different real pricing. Binary contract pricing already contains its cost; no additional invented commission is deducted. Multipliers include the quoted entry commission once. Accumulator barriers/growth and Multiplier prices/fees remain approximate historical models, not Deriv-settled contracts.
 
@@ -107,7 +107,7 @@ Official references checked:
 
 ## Tests and reproduction
 
-The review run passed **95 Node checks and 47 Python checks (142 total)**. Coverage includes the existing six simulation-integrity fixes, payout/commission/precision regressions, cold-50 warm-up on both sides, server-side Demo selection, unknown/missing tick rejection, no future data in validation selection, funding/ledger reconciliation, staking exposure, realistic stop overshoots, actual-settlement ticket display, desktop/mobile research UI, account-view refresh failures, a public-read allowlist covering saved-snapshot retries, and existing OAuth/CSRF protections. All order-path tests use mocks. New production account viewing and automatic Demo choice still require acceptance after an approved deployment.
+The split foundation passed 96 Node checks and 48 Python checks (144 total). Coverage includes the existing six simulation-integrity fixes, payout/commission/precision regressions, rejection of experimental policies by Demo routes, server-side Demo selection, unknown/missing tick rejection, no future data in validation selection, funding/ledger reconciliation, staking exposure, realistic stop overshoots, actual-settlement ticket display, desktop/mobile research UI, account-view refresh failures, a public-read allowlist covering saved-snapshot retries, and existing OAuth/CSRF protections. All order-path tests use mocks. New read-only account viewing and payout references still require acceptance after an approved deployment; Demo automatic choice is excluded.
 
 Offline reproduction using the current dependencies:
 
@@ -126,4 +126,4 @@ python scripts/capture-research.py
 
 Run the collector with the existing backend Python environment. It has an explicit public-read allowlist and uses serial paced requests. No paid service or new dependency was introduced.
 
-Before an approved backend update, stop new Demo entries and allow any open contract to settle. After deployment, reconnect and verify the read-only account list, automatic 50-tick warm-up and minimum-stake Demo result against Deriv. The live site has not been changed by this branch.
+Before an approved backend update, stop new Demo entries and allow any open contract to settle. After deployment, reconnect and verify the read-only account list, preserved manual Demo digit selection and minimum-stake Demo result against Deriv. The live site has not been changed by this branch.

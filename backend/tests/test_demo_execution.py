@@ -205,9 +205,31 @@ def test_research_update_keeps_demo_settlement_and_session_limit_calculations_un
     original = subprocess.check_output(["git", "show", "a5556bc:backend/lib/deriv_demo.py"], text=True)
     tree = ast.parse(original)
     klass = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Broker")
-    for name in ["monitor", "limit_reached"]:
+    for name in ["select", "start", "message", "monitor", "limit_reached"]:
         node = next(n for n in klass.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name)
         assert inspect.getsource(getattr(Broker, name)).strip() == ast.get_source_segment(original, node).strip()
+
+
+def test_demo_configuration_cannot_accept_an_experimental_digit_policy():
+    with pytest.raises(ValidationError):
+        RunConfig(symbol="R_100", product="differs", stake=100, digit_mode="cold50")
+    assert set(RunConfig.model_fields) == {"symbol", "product", "stake", "digit", "growth", "mult", "direction", "target", "max_loss", "max_trades"}
+
+
+@pytest.mark.asyncio
+async def test_missing_payout_metadata_does_not_change_demo_execution_decisions():
+    b, s = await setup(digit=7)
+    request = s.channel.request
+    async def no_display_payout(payload):
+        response = await request(payload)
+        if "proposal" in payload:
+            response["proposal"].pop("payout", None)
+        return response
+    s.channel.request = no_display_payout
+    await b.signal(s)
+    assert s.pending["digit"] == 7 and s.pending["quoted_payout"] is None
+    assert len([p for p in s.channel.calls if "buy" in p]) == 1
+    await b.shutdown()
 
 
 @pytest.mark.parametrize("operation", ["buy", "sell", "authorize", "contract_update", "cashier"])
@@ -297,38 +319,8 @@ async def test_actual_proposals_and_single_buy_per_pending_order(product, contra
     await b.shutdown()
 
 
-@pytest.mark.asyncio
-async def test_automatic_digit_requires_fifty_verified_ticks_and_ignores_the_browser_digit():
-    b = FakeBroker()
-    s = await b.create(TOKEN, "oauth", 3600, ORIGIN)
-    await b.start(s, RunConfig(symbol="R_100", product="differs", stake=100, digit=9, digit_mode="cold50"))
-    now = int(time.time())
-    for i in range(49):
-        b.message(s, {"tick": {"symbol": "R_100", "quote": 100.02, "epoch": now - 98 + i * 2, "pip_size": 2}})
-    await b.signal(s)
-    assert not any("buy" in p for p in s.channel.calls)
-    assert s.public()["run"]["digit_observations"] == 49
-    b.message(s, {"tick": {"symbol": "R_100", "quote": 100.05, "epoch": now, "pip_size": 2}})
-    await b.signal(s)
-    proposal = next(p for p in s.channel.calls if "proposal" in p)
-    assert proposal["barrier"] == "0" and s.automatic_digit == 0
-    assert s.pending["digit"] == 0 and s.pending["quoted_profit"] == 9
-    assert s.pending["quoted_payout"] == 109
-    await b.shutdown()
 
 
-@pytest.mark.asyncio
-async def test_automatic_digits_do_not_count_duplicates_or_unknown_precision():
-    b, s = await setup(digit_mode="cold50")
-    s.last_tick = None
-    now = int(time.time())
-    tick = {"symbol": "R_100", "quote": 100.02, "epoch": now - 2, "pip_size": 2}
-    b.message(s, {"tick": tick}); b.message(s, {"tick": tick})
-    assert len(s.digit_history) == 1
-    b.message(s, {"tick": {**tick, "epoch": now, "pip_size": None}})
-    await b.signal(s)
-    assert s.digit_history == [] and not any("buy" in p for p in s.channel.calls)
-    await b.shutdown()
 
 
 @pytest.mark.asyncio
@@ -495,6 +487,15 @@ def test_validation_errors_do_not_echo_credentials(demo_http):
     value = TOKEN * 300
     response = client.post("/api/deriv/session", json={"token": value}, headers={"Origin": ORIGIN})
     assert response.status_code == 422 and TOKEN not in response.text and '"input"' not in response.text
+
+
+def test_research_digit_policies_are_rejected_by_the_demo_http_route(demo_http):
+    client, b = demo_http
+    login = client.post("/api/deriv/session", json={"token": TOKEN}, headers={"Origin": ORIGIN})
+    response = client.post("/api/deriv/demo/start", headers={"Origin": ORIGIN, "X-Deriv-CSRF": login.json()["csrf"]},
+        json={"symbol": "R_100", "product": "differs", "stake": 1, "digit_mode": "cold50"})
+    assert response.status_code == 422
+    assert not any(s.cfg for s in b.sessions.values())
 
 
 def test_oauth_exchange_keeps_access_token_on_backend(demo_http, monkeypatch):

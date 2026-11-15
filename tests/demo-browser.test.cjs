@@ -170,9 +170,9 @@ test("browser Demo: late status responses cannot replace newer controls or balan
   assert.equal(await page.evaluate(() => state.demo.status), "running");
 });
 
-test("browser Demo: manual digits are removed and payout risk uses actual $15.05 settlements, not public estimates", { timeout: 15000 }, async t => {
+test("browser Demo: manual digits are preserved and payout risk uses actual $15.05 settlements, not public estimates", { timeout: 15000 }, async t => {
   const page = await open(t);
-  assert.equal(await page.locator("button[data-digit]").count(), 0);
+  assert.equal(await page.locator("button[data-digit]").count(), 10);
   await page.locator("#execution-mode").selectOption("demo");
   assert.equal(await page.locator("#tk-profit").innerText(), "Quoted at entry");
   await page.evaluate(() => {
@@ -185,4 +185,16 @@ test("browser Demo: manual digits are removed and payout risk uses actual $15.05
   assert.equal(await page.locator("#tk-profit").innerText(), "+$15.05");
   assert.match(await page.locator("#tk-note").innerText(), /93\.0% wins/);
   assert.match(await page.locator("#tk-note").innerText(), /13\.3 such wins/);
+});
+
+test("browser Demo: research selection cannot replace the manual Demo digit", { timeout: 15000 }, async t => {
+  const page = await open(t);
+  await page.locator("#execution-mode").selectOption("demo");
+  await page.locator('button[data-digit="7"]').click();
+  await page.locator("#start-btn").click();
+  await page.waitForFunction(() => state.demo?.status === "running" && !state.demoBusy);
+  const start = model.calls.find(c => c.path === "/api/deriv/demo/start");
+  assert.equal(start.body.digit, 7);
+  assert.equal("digit_mode" in start.body, false);
+  assert.equal(await page.evaluate(() => state.settings.autoDigit), false);
 });

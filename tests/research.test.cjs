@@ -162,6 +162,15 @@ test("missing quotes, malformed prices and historical gaps cannot create results
   }
 });
 
+test("NO TRADE has no fallback strategy or staking projection when nothing qualifies", () => {
+  const report = R.compare(data(), {}, { stake: 1, balance: 10 });
+  assert.equal(report.decision, "NO TRADE");
+  assert.equal(report.selected, null); assert.equal(report.stakingReference, null);
+  assert.equal(report.staking.length, 0);
+  assert.match(report.selectionNote, /No fallback strategy/);
+  assert.ok(report.rows.every(row => row.holdout.trades === 0 && row.holdout.available === 10));
+});
+
 test("quote records reject missing commissions and payout models instead of inventing defaults", () => {
   const specs = R.quoteSpecs("R_100", 100);
   assert.equal(R.quoteRecord(specs.find(q => q.key === "mult:up"), { proposal: { ask_price: 1 } }, 1), null);

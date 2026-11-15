@@ -251,10 +251,11 @@
     const qualified = rows.filter(r => r.validation.trades >= 30 && r.validation.net > 0 && !r.validation.unresolved && r.validation.maxDD <= (options.balance ?? 1000) * .25);
     qualified.sort((a, b) => b.validation.net - a.validation.net || a.validation.maxDD - b.validation.maxDD || a.id.localeCompare(b.id));
     const selected = qualified[0]?.id ?? null;
-    const stakeReference = selected || "diff-fixed";
-    const staking = ["flat", "paroli2", "paroli3", "martingale3"].map(model => simulate(data, quotes, stakeReference, { ...options, staking: model, purgeBoundary: true }, second, n));
+    const stakeReference = selected;
+    const staking = selected ? ["flat", "paroli2", "paroli3", "martingale3"].map(model => simulate(data, quotes, stakeReference, { ...options, staking: model, purgeBoundary: true }, second, n)) : [];
     return { symbol: data.symbol, observations: n, period: [data.times[0], data.times[n - 1]], first, second, rows, selected,
-      selectionNote: selected ? "Chosen using validation only; holdout is a check, not a profitability claim." : "No candidate met the predeclared validation requirements. Abstain; staking table uses fixed-Differs solely as a risk reference.",
+      decision: selected ? "RESEARCH CANDIDATE ONLY" : "NO TRADE",
+      selectionNote: selected ? "Chosen using validation only; holdout is a check, not a profitability claim." : "NO TRADE — no candidate met the research criteria. No fallback strategy or stake is selected. Original benchmarks remain visible above.",
       stakingReference: stakeReference, staking, caveat: CAVEAT };
   }
 

@@ -81,7 +81,6 @@ async function dashboard(t, viewport = { width: 1440, height: 900 }) {
   await page.goto(origin);
   await page.waitForFunction(() => window.__requests.some((q) => q.ticks));
   await page.evaluate(() => window.__tick());
-  await page.evaluate(() => { state.settings.autoDigit = false; }); // Legacy session fixtures; automatic choice has its own check.
   await page.locator("#stake-input").fill("100");
   await page.locator("#stake-input").dispatchEvent("change");
   return page;
@@ -179,7 +178,8 @@ test("browser: virtual research compares contracts and staking without changing 
   await page.locator("#research-run").click();
   await page.locator("#research-output").waitFor({ state: "visible" });
   assert.equal(await page.locator("#research-body tr").count(), 23);
-  assert.equal(await page.locator("#research-staking tr").count(), 4);
+  const noTrade = (await page.locator("#research-selection").innerText()).includes("NO TRADE");
+  assert.equal(await page.locator("#research-staking tr").count(), noTrade ? 0 : 4);
   assert.match(await page.locator("#research-status").innerText(), /final 40% held out/);
   assert.match(await page.locator("#research-body").innerText(), /stake outside configured contract limits/);
   assert.match(await page.locator("#research-caveat").innerText(), /not historical executable quotes/);

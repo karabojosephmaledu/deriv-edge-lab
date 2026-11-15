@@ -15,7 +15,6 @@ import time
 from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import quote, urlsplit
-from typing import Literal
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -74,7 +73,6 @@ class RunConfig(BaseModel):
     product: str
     stake: float = Field(gt=0, le=5000, strict=True)
     digit: int = Field(default=5, ge=0, le=9, strict=True)
-    digit_mode: Literal["fixed", "cold50"] = "fixed"
     growth: float = 0.03
     mult: int = Field(default=100, strict=True)
     direction: str = "up"
@@ -200,8 +198,6 @@ class Session:
     epochs: list = field(default_factory=list)
     last_entry: int = 0
     needs_history: bool = False
-    digit_history: list = field(default_factory=list)
-    automatic_digit: int | None = None
     monitor: object = field(default=None, repr=False)
 
     def public(self):
@@ -212,8 +208,6 @@ class Session:
                 "accounts_error": self.accounts_error,
                 "account": self.account, "owner": self.owner, "expires_at": self.expires,
                 "run": {"id": self.run_id, "status": self.status, "net": self.net,
-                        "digit_mode": self.cfg.digit_mode if self.cfg else None,
-                        "digit_observations": len(self.digit_history), "automatic_digit": self.automatic_digit,
                         "history": self.history, "pending": self.pending, "error": self.error}}
 
 
@@ -310,7 +304,6 @@ class Broker:
         s.epochs = []
         s.cfg, s.run_id, s.status, s.error = None, None, "idle", None
         s.net, s.history, s.last_entry, s.needs_history = 0, [], 0, False
-        s.digit_history, s.automatic_digit = [], None
         s.channel = self.channel_factory(lambda m: self.message(s, m), lambda: self.disconnected(s))
         await s.channel.open(url)
         response = await s.channel.request({"balance": 1, "subscribe": 1})
@@ -367,12 +360,6 @@ class Broker:
             s.last_tick = {"epoch": epoch, "received": time.monotonic()}
             s.epochs.append(epoch)
             s.epochs = s.epochs[-5000:]
-            pip = tick.get("pip_size")
-            if isinstance(pip, (int, float)) and not isinstance(pip, bool) and math.isfinite(pip) and pip == int(pip) and 0 <= pip <= 10:
-                s.digit_history.append(int(format(price, f".{int(pip)}f")[-1]))
-                s.digit_history = s.digit_history[-50:]
-            elif s.cfg.digit_mode == "cold50":
-                s.digit_history = []  # No automatic entry from incomplete precision data.
 
     def disconnected(self, s):
         s.connected = False
@@ -409,7 +396,6 @@ class Broker:
             raise DemoError("The Demo account already has open contracts. Let them finish before starting.", 409)
         s.cfg, s.run_id, s.status, s.error = cfg, secrets.token_hex(16), "running", None
         s.net, s.history, s.last_entry, s.last_tick, s.epochs, s.needs_history = 0, [], 0, None, [], False
-        s.digit_history, s.automatic_digit = [], None
         await s.channel.request({"forget_all": "ticks"})
         await s.channel.request({"ticks": cfg.symbol, "subscribe": 1})
         return s.public()
@@ -429,12 +415,6 @@ class Broker:
             return s.public()  # Never accept browser prices or generated ticks as execution data.
         if tick["epoch"] <= s.last_entry:
             return s.public()
-        if c.product == "differs" and c.digit_mode == "cold50":
-            if len(s.digit_history) < 50:
-                return s.public()
-            counts = [s.digit_history.count(d) for d in range(10)]
-            s.automatic_digit = min(range(10), key=lambda d: (counts[d], d))
-            c = c.model_copy(update={"digit": s.automatic_digit})
         if c.max_loss is not None and s.net - c.stake < -c.max_loss - 1e-9:
             s.status = "done"
             return s.public()
@@ -454,9 +434,13 @@ class Broker:
         price = amount(proposal.get("ask_price"))
         if not proposal.get("id") or price <= 0 or price != c.stake:
             raise DemoError("The authenticated Demo quote does not match the requested stake.", 502)
-        quoted_payout = amount(proposal.get("payout")) if c.product == "differs" else None
-        if quoted_payout is not None and quoted_payout <= price:
-            raise DemoError("Deriv returned no positive Differs profit in the authenticated quote.", 502)
+        # Display metadata only: unavailable quote details must not change execution.
+        quoted_payout = None
+        if c.product == "differs":
+            with contextlib.suppress(DemoError):
+                value = amount(proposal.get("payout"))
+                if value > price:
+                    quoted_payout = value
         order_id = s.run_id + ":" + str(tick["epoch"])
         try:
             await self.db.demo_account_locks.find_one_and_update(
@@ -467,9 +451,9 @@ class Broker:
             raise DemoError("Another Demo order is active or unresolved; no duplicate was submitted.", 409) from None
         order = {"_id": order_id, "id": order_id, "run_id": s.run_id, "account_id": s.account["id"],
                  "config": c.model_dump(), "product": c.product, "stake": c.stake, "symbol": c.symbol,
-                 "digit": c.digit, "label": {"differs": f"Differs {c.digit}", "accu": f"Accumulator {c.growth:.0%}", "mult": f"Multiplier ×{c.mult} {c.direction}"}[c.product],
                  "quoted_payout": quoted_payout, "quoted_profit": amount(quoted_payout - price) if quoted_payout is not None else None,
                  "quoted_at": time.time(),
+                 "digit": c.digit, "label": {"differs": f"Differs {c.digit}", "accu": f"Accumulator {c.growth:.0%}", "mult": f"Multiplier ×{c.mult} {c.direction}"}[c.product],
                  "status": "ordering", "profit": None, "opened_at": time.time(), "contract_id": None}
         try:
             await self.db.demo_orders.insert_one(order)

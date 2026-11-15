@@ -149,8 +149,19 @@
 
         <section class="card matrix-card" data-testid="digit-matrix-card">
           <div id="digit-section">
-            <div class="card-kicker">Automatic digit choice · experimental</div>
-            <p class="hint">Differs avoids the least frequent digit in the previous 50 verified ticks. Ties use the lowest digit. Frequency does not predict the next digit.</p>
+            <div class="card-kicker">Select digit 0–9 · avoid this digit</div>
+            <div class="digit-grid" role="group" aria-label="Digit selection">
+              <button class="digit" type="button" data-testid="digit-button-0" data-digit="0" aria-pressed="false"><span class="digit-num">0</span><span class="digit-pay" data-testid="digit-pay-0" data-digit-pay="0">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-1" data-digit="1" aria-pressed="false"><span class="digit-num">1</span><span class="digit-pay" data-testid="digit-pay-1" data-digit-pay="1">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-2" data-digit="2" aria-pressed="false"><span class="digit-num">2</span><span class="digit-pay" data-testid="digit-pay-2" data-digit-pay="2">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-3" data-digit="3" aria-pressed="false"><span class="digit-num">3</span><span class="digit-pay" data-testid="digit-pay-3" data-digit-pay="3">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-4" data-digit="4" aria-pressed="false"><span class="digit-num">4</span><span class="digit-pay" data-testid="digit-pay-4" data-digit-pay="4">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-5" data-digit="5" aria-pressed="false"><span class="digit-num">5</span><span class="digit-pay" data-testid="digit-pay-5" data-digit-pay="5">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-6" data-digit="6" aria-pressed="false"><span class="digit-num">6</span><span class="digit-pay" data-testid="digit-pay-6" data-digit-pay="6">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-7" data-digit="7" aria-pressed="false"><span class="digit-num">7</span><span class="digit-pay" data-testid="digit-pay-7" data-digit-pay="7">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-8" data-digit="8" aria-pressed="false"><span class="digit-num">8</span><span class="digit-pay" data-testid="digit-pay-8" data-digit-pay="8">—</span></button>
+              <button class="digit" type="button" data-testid="digit-button-9" data-digit="9" aria-pressed="false"><span class="digit-num">9</span><span class="digit-pay" data-testid="digit-pay-9" data-digit-pay="9">—</span></button>
+            </div>
             <p class="hint digit-explain" id="digit-explain" data-testid="digit-explain"></p>
           </div>
 

@@ -100,7 +100,7 @@ const state = {
   snapshotRevision: 0,
   tradeRetryDelay: 1000,
   settings: {
-    symbol: "R_100", product: "differs", digit: 5, autoDigit: true, stake: 1, entryFilter: false,
+    symbol: "R_100", product: "differs", digit: 5, autoDigit: false, stake: 1, entryFilter: false,
     growth: 0.03, mult: 100, dir: "up", contractTp: 0.1, target: null, maxLoss: null, maxTrades: MAX_TRADES, sound: true,
   },
   trail: [],
@@ -571,7 +571,7 @@ function currentCfg() {
   const s = state.settings;
   const cfg = { product: s.product, stake: s.stake, tp: s.contractTp };
   if (s.product === "differs") {
-    const digit = s.autoDigit && state.freqQueue.length >= 50 ? coldestDigit(state.freqQueue.slice(-50)) : s.digit;
+    const digit = s.autoDigit && state.freqQueue.length >= 30 ? coldestDigit(state.freqQueue) : s.digit;
     Object.assign(cfg, { digit, m: differsMultiplier(digit).m });
   } else if (s.product === "accu") {
     Object.assign(cfg, { growth: s.growth }, accuParams());
@@ -643,7 +643,6 @@ function simulateTick(price, digit) {
   }
   if (state.session !== "running") return;
   if (checkSessionLimits()) return;
-  if (state.settings.product === "differs" && state.settings.autoDigit && state.freqQueue.length < 50) return;
   const cfg = currentCfg();
   const { maxLoss } = state.settings;
   if (maxLoss != null && state.stats.net - cfg.stake < -maxLoss - 1e-9) {
@@ -950,7 +949,8 @@ async function runVirtualResearch() {
     const staking = $("research-staking"); staking.textContent = "";
     for (const r of report.staking) row(staking, [r.staking + (r.staking === "martingale3" ? " · RISK EXAMPLE" : ""), r.trades,
       fmtSigned(r.net), money(r.maxDD), money(r.available), r.status]);
-    $("research-selection").textContent = report.selectionNote + " Staking reference: " + report.stakingReference + ". Selection never uses the held-out results. No strategy is promoted to the bot.";
+    $("research-selection").textContent = report.decision + ". " + report.selectionNote +
+      (report.selected ? " Staking reference: " + report.stakingReference + "." : " No staking projection is made.") + " Selection never uses the held-out results. No strategy is promoted to the bot.";
     $("research-caveat").textContent = report.caveat + " A maximum-duration buffer prevents contracts crossing evaluation boundaries; short phases can be too short for long contracts. Binary open positions are valued at cost, not an invented resale quote; their final P/L is unknown. Multiplier stops use observed prices and can slip beyond intended limits. Progressive stakes scale snapshot quotes approximately and may change real pricing. Paroli increases exposure after wins; Martingale increases it after losses and stops after three levels or insufficient funds.";
     status.textContent = symbol + " · " + data.prices.length + " ticks · " + new Date(data.times[0] * 1000).toISOString() + " to " + new Date(data.times.at(-1) * 1000).toISOString() +
       ". First 40% training (200-tick warm-up), next 20% validation, final 40% held out. " + failed + " unavailable quotes/models; no substitute payouts. All results use the separate virtual wallet.";
@@ -1203,12 +1203,12 @@ async function startDemoSession() {
   if (state.demoBusy) return;
   if (!state.account?.isVirtual || state.account.currency !== "USD") return toast("Connect an authorised USD Demo account first.", "error");
   if (!liveSimulationReady()) return toast("Wait for live Deriv market data.", "error");
-  if (state.settings.entryFilter) return toast("Experimental comparison filters remain simulation-only.", "info");
+  if (state.settings.autoDigit || state.settings.entryFilter) return toast("Experimental comparison filters remain simulation-only. Use manual settings for Demo execution.", "info");
   state.demoBusy = true; renderControls();
   try {
     const s = state.settings;
     const data = state.demo?.status === "paused" ? await demoApi("/demo/control", "POST", { action: "resume" }) : await demoApi("/demo/start", "POST", {
-      symbol: s.symbol, product: s.product, stake: s.stake, digit: s.digit, digit_mode: "cold50", growth: s.growth,
+      symbol: s.symbol, product: s.product, stake: s.stake, digit: s.digit, growth: s.growth,
       mult: s.mult, direction: s.dir, target: s.target, max_loss: s.maxLoss, max_trades: s.maxTrades,
     });
     state.demoHalted = false;
@@ -1407,19 +1407,6 @@ function renderTicket() {
 function renderDigitExplain() {
   const s = state.settings;
   if (s.product !== "differs") return;
-  if (state.execution === "demo") {
-    const run = state.demo;
-    $("digit-explain").textContent = run?.digit_mode === "cold50" ? run.automatic_digit == null ?
-      "Collecting authenticated Demo ticks: " + (run.digit_observations || 0) + "/50. No entry until ready." :
-      "Last automatic Demo choice: avoid " + run.automatic_digit + ". Based on 50 past authenticated ticks, not a prediction." :
-      "A new Demo session uses automatic choice after 50 authenticated ticks. An existing fixed-digit contract keeps its original settings.";
-    return;
-  }
-  if (s.autoDigit) {
-    $("digit-explain").textContent = state.freqQueue.length < 50 ? "Collecting verified ticks: " + state.freqQueue.length + "/50. No entry until ready." :
-      "Automatic choice: avoid " + coldestDigit(state.freqQueue.slice(-50)) + " · previous 50 ticks. No proven predictive advantage.";
-    return;
-  }
   const d = s.digit;
   const total = state.freqQueue.length;
   $("digit-explain").textContent = total
@@ -1696,6 +1683,7 @@ function bindEvents() {
     const b = e.target.closest("[data-mult]");
     if (b) changeSetting({ mult: Number(b.dataset.mult) }, true);
   });
+  document.querySelectorAll(".digit").forEach((b) => on(b, "click", () => changeSetting({ digit: Number(b.dataset.digit) })));
   on("stake-input", "change", (e) => changeSetting({ stake: Number(e.target.value) || STAKE_MIN[state.settings.product] }, true));
   on("target-input", "change", (e) => changeSetting({ target: num(e.target.value, 0.01) }));
   on("maxloss-input", "change", (e) => changeSetting({ maxLoss: num(e.target.value, 0.01) }));
@@ -1722,6 +1710,13 @@ function bindEvents() {
     try { await clearCred(); } catch (err) { toast(errText(err), "error"); }
   });
   on("account-select", "change", (e) => switchAccount(e.target.value));
+
+  document.addEventListener("keydown", (e) => {
+    if ($("connect-dialog").open || state.settings.product !== "differs") return;
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+    if (/^[0-9]$/.test(e.key)) changeSetting({ digit: Number(e.key) });
+  });
+
 
 }
 
