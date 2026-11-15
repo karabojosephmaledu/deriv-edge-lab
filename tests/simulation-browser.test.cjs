@@ -163,6 +163,11 @@ test("browser: mobile dashboard retains its layout with unresolved-status text",
   await page.evaluate(() => { window.__tick(); window.__socket.close(); });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   assert.ok(overflow <= 2, `Horizontal overflow: ${overflow}px`);
+  const header = await page.evaluate(() => {
+    const brand = document.querySelector('.brand').getBoundingClientRect(), controls = document.querySelector('.topbar-actions').getBoundingClientRect();
+    return { brandBottom: brand.bottom, controlsTop: controls.top };
+  });
+  assert.ok(header.controlsTop >= header.brandBottom, 'Mobile header controls must occupy their own row');
   assert.equal(await page.locator("#start-btn").isVisible(), true);
 });
 
