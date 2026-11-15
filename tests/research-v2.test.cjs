@@ -115,7 +115,7 @@ test("new evidence gates use past observations and abstain without evidence", ()
 
 test("virtual rebuild cannot change Demo account configuration or order code", () => {
   for (const file of ["backend/lib/deriv_demo.py", "backend/routers/deriv.py"]) {
-    assert.equal(fs.readFileSync(path.join(root, file), "utf8"), execFileSync("git", ["show", "17b50cfa:" + file], { cwd: root, encoding: "utf8" }));
+    assert.equal(fs.readFileSync(path.join(root, file), "utf8"), execFileSync("git", ["show", "a5556bc:" + file], { cwd: root, encoding: "utf8" }));
   }
   const app = fs.readFileSync(path.join(root, "frontend/public/app.js"), "utf8");
   assert.doesNotMatch(app, /digit_mode:\s*["']cold/);

@@ -36,6 +36,7 @@
           <span class="badge badge-sim" id="mode-badge" data-testid="mode-badge">Research · virtual money</span>
         </div>
         <div class="topbar-actions">
+          <button class="btn btn-outline btn-sm" id="sound-toggle" type="button" aria-pressed="true">Sound ON</button>
           <span class="status-pill" id="connection-status" data-testid="connection-status" role="status">
             <span class="dot dot-warn" id="status-dot"></span>
             <span id="connection-status-text">Connecting…</span>
@@ -50,6 +51,7 @@
       <section class="card account-card" id="account-card" data-testid="account-card">
         <div class="account-info">
           <div class="card-kicker">Deriv account</div>
+          <p class="hint" id="account-auth-status" role="status">Checking account authorization…</p>
           <div id="account-empty">
             <p class="muted account-copy">Connect your Deriv Demo account. Credentials stay on the secure backend.</p>
             <button class="btn btn-primary" id="connect-button" data-testid="connect-button" type="button">Connect with Deriv</button>
@@ -68,7 +70,9 @@
               <span class="currency" id="balance-currency" data-testid="balance-currency"></span>
               <span class="badge badge-demo" id="account-type" data-testid="account-type">Demo</span>
             </div>
-            <select class="select select-sm" id="account-select" data-testid="account-select" aria-label="Active account" hidden></select>
+            <label class="field-label" for="account-select">Authorized Demo account</label>
+            <select class="select select-sm" id="account-select" data-testid="account-select" aria-label="Active account"></select>
+            <p class="hint" id="account-balance-status" role="status">Read-only Deriv balance · no virtual profit is added</p>
             <div class="account-meta muted">
               <span id="account-loginid" data-testid="account-loginid"></span>
               <button class="btn btn-ghost btn-sm" id="disconnect-button" data-testid="disconnect-button" type="button">Disconnect</button>
@@ -80,6 +84,7 @@
             </details>
           </div>
           <a href="https://home.deriv.com/" target="_blank" rel="noopener noreferrer" class="hint">Open Deriv portal in another tab ↗</a>
+          <button class="btn btn-ghost btn-sm" id="account-refresh" type="button">Refresh account status</button>
         </div>
         <div class="shield" data-testid="execution-disabled-note">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -107,6 +112,18 @@
       </section>
 
       <!-- ============ VIRTUAL SIMULATION ============ -->
+      <section class="card" id="virtual-wallet" aria-labelledby="virtual-wallet-title">
+        <div class="card-kicker" id="virtual-wallet-title">Virtual simulation wallet · separate from Deriv</div>
+        <div class="metric-grid">
+          <div class="tile"><span class="tile-label">Starting virtual balance</span><span class="tile-value" id="wallet-start">$1,000.00</span></div>
+          <div class="tile"><span class="tile-label">Current virtual balance</span><span class="tile-value" id="wallet-current">$1,000.00</span></div>
+          <div class="tile"><span class="tile-label">Available virtual money</span><span class="tile-value" id="wallet-available">$1,000.00</span></div>
+          <div class="tile"><span class="tile-label">Virtual profit/loss</span><span class="tile-value" id="wallet-profit">$0.00</span></div>
+        </div>
+        <p class="hint" id="virtual-wallet-note">Simulation results never change the connected Deriv balance.</p>
+        <label class="field-label" for="virtual-start-input">Starting balance for the next virtual session ($)</label>
+        <input class="input" id="virtual-start-input" type="number" min="0.01" max="1000000000" step="0.01" value="1000" />
+      </section>
       <div class="grid-main">
         <section class="card strategy-card" data-testid="strategy-card">
           <div class="card-kicker" id="trade-type-label">Trade type · virtual</div>
@@ -214,6 +231,8 @@
       <div class="grid-bottom">
         <section class="card history-card" data-testid="trade-history-card">
           <div class="card-kicker"><span id="history-label">Virtual trade history (simulated)</span> <span class="muted" id="history-count" data-testid="history-count"></span></div>
+          <label class="field-label" for="virtual-session-select">Saved virtual session history</label>
+          <select class="select select-sm" id="virtual-session-select"><option value="">Current virtual session</option></select>
           <div class="table-wrap history-scroll" data-testid="history-scroll">
             <table class="table" data-testid="trade-history-table">
               <thead><tr><th>#</th><th>Time</th><th>Contract</th><th>Stake</th><th>P/L</th><th>Result</th></tr></thead>
@@ -230,6 +249,21 @@
       </div>
 
       <!-- ============ OPTIONAL: STRATEGY COMPARISON ============ -->
+      <section class="card" id="educational-research" aria-labelledby="educational-title">
+        <div class="card-kicker" id="educational-title">Educational research · historical virtual scenarios</div>
+        <label class="field-label" for="educational-category">Research category · never an account order</label>
+        <select class="select" id="educational-category">
+          <option value="differs">Digit Differs</option><option value="accu">Accumulator</option><option value="mult">Multiplier</option>
+          <option value="matches">Digit Matches</option><option value="touch">Touch</option><option value="notouch">No Touch</option>
+        </select>
+        <h2 id="educational-name">Digit Differs</h2>
+        <p id="educational-description" class="hint"></p>
+        <p class="hint" id="educational-verdict" role="status">Loading preserved research evidence…</p>
+        <dl class="educational-grid" id="educational-metrics"></dl>
+        <p class="hint" id="educational-limitations"></p>
+        <p class="hint" id="educational-history"></p>
+        <p class="hint">Verdicts: FAILED, INCONCLUSIVE, or SUPPORTED BY EVIDENCE within a stated virtual scenario. No current study qualified. The strict research result remains <strong>NO TRADE</strong>.</p>
+      </section>
       <details class="card lab-card" id="lab-card" data-testid="lab-card">
         <summary class="lab-summary" data-testid="lab-toggle">Strategy comparison <span class="muted">(optional · last 1,000 ticks)</span></summary>
         <div class="lab-body-wrap">
@@ -286,15 +320,15 @@
     <dialog class="dialog" id="connect-dialog" data-testid="deriv-account-modal" aria-labelledby="connect-title">
       <div class="dialog-inner">
         <div class="dialog-head">
-          <h2 id="connect-title">Connect Deriv account</h2>
+          <h2 id="connect-title">Connect Demo Account</h2>
           <p class="dialog-sub">Official login returns you here. Connecting alone sends no orders; only explicit Demo mode and Start can submit Demo contracts. Real-money trading is blocked.</p>
         </div>
         <div class="oauth-block" id="oauth-block" hidden>
-          <button class="btn btn-primary btn-block" id="oauth-connect-button" data-testid="oauth-connect-button" type="button">Connect with Deriv</button>
-          <p class="hint">You approve access on deriv.com and return here. Your Deriv app must list this exact redirect URL:</p>
-          <code class="redirect-url" id="oauth-redirect-url" data-testid="oauth-redirect-url"></code>
+          <button class="btn btn-primary btn-block" id="oauth-connect-button" data-testid="oauth-connect-button" type="button">Connect Demo Account with Deriv</button>
+          <p class="hint">Sign in securely on Deriv and return to your dashboard.</p>
         </div>
-        <div class="divider"><span>or connect with an API token</span></div>
+        <p class="hint" id="connect-status" role="status">No authorized account connected.</p>
+        <details id="token-details"><summary>Alternative: connect with a private API token</summary>
         <form id="token-form" novalidate>
           <label class="field-label" for="token-input">API token</label>
           <input class="input" id="token-input" data-testid="token-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Deriv API token" />
@@ -305,10 +339,11 @@
           </p>
           <p class="form-error" id="connect-error" data-testid="connect-error" hidden></p>
           <div class="dialog-actions">
-            <button class="btn btn-ghost" type="button" id="connect-cancel-button" data-testid="connect-cancel-button">Cancel</button>
             <button class="btn btn-primary" type="submit" id="token-connect-button" data-testid="token-connect-button">Connect</button>
           </div>
         </form>
+        </details>
+        <button class="btn btn-ghost" type="button" id="connect-cancel-button" data-testid="connect-cancel-button">Cancel</button>
       </div>
     </dialog>
 

@@ -69,6 +69,7 @@ const CRED_KEY = "del.cred";
 const ACTIVE_KEY = "del.activeAccount";
 const PKCE_KEY = "del.pkce";
 const SETTINGS_KEY = "del.settings.v4";
+const VIRTUAL_KEY = "del.virtual.session.v1";
 
 /* --------------------------------- state --------------------------------- */
 
@@ -89,6 +90,13 @@ const state = {
   activeId: null,
   owner: null,
   connecting: false,
+  accountStatus: "checking",
+  balanceStatus: "unavailable",
+  balanceUpdatedAt: null,
+  balanceError: null,
+  accountError: null,
+  noticeRun: null,
+  noticeSeen: new Set(),
   execution: "simulation",
   demo: null,
   csrf: null,
@@ -120,6 +128,12 @@ const state = {
   stats: null,
   history: [],
   seq: 0,
+  virtualWallet: null,
+  virtualStarting: 1000,
+  virtualArchives: [],
+  virtualSaved: null,
+  archiveSelection: "",
+  storageError: false,
 };
 
 function freshStats() {
@@ -148,6 +162,7 @@ function loadSettings() {
     t.stake = num(s.stake, 0.35) || 1;
     t.target = num(s.target, 0.01);
     t.maxLoss = num(s.maxLoss, 0.01);
+    if (typeof s.sound === "boolean") t.sound = s.sound;
   } catch {
     /* defaults stand */
   }
@@ -160,6 +175,96 @@ function saveSettings() {
   } catch {
     /* ignore */
   }
+}
+
+/* Separate virtual ledger. This code never reads or changes a Deriv balance. */
+const roundMoney = n => Math.round((n + Number.EPSILON) * 100) / 100;
+function ensureVirtualWallet() {
+  if (!state.virtualWallet) state.virtualWallet = { id: Date.now().toString(36) + "-" + Math.random().toString(36).slice(2),
+    starting: state.virtualStarting, net: 0, reserved: 0, pending: null, settled: [] };
+  return state.virtualWallet;
+}
+function virtualBalance() {
+  const w = ensureVirtualWallet();
+  return { starting: w.starting, current: roundMoney(w.starting + w.net), available: roundMoney(w.starting + w.net - w.reserved), net: w.net, reserved: w.reserved };
+}
+function captureVirtualState() {
+  return JSON.parse(JSON.stringify({ wallet: ensureVirtualWallet(), stats: state.stats, history: state.history,
+    seq: state.seq, session: state.session, lastResult: state.lastResult, openPosition: state.pos }));
+}
+function validateVirtualSnapshot(s) {
+  const w = s?.wallet, st = s?.stats;
+  if (!w || !st || typeof w.id !== "string" || !Number.isFinite(w.starting) || w.starting < .01 || w.starting > 1e9 ||
+      !Number.isFinite(w.net) || !Number.isFinite(w.reserved) || w.reserved < 0 || roundMoney(w.starting + w.net - w.reserved) < 0 ||
+      !Array.isArray(w.settled) || w.settled.length > MAX_TRADES || new Set(w.settled).size !== w.settled.length ||
+      !Array.isArray(s.history) || s.history.length > HISTORY_LIMIT || !Number.isInteger(s.seq) || s.seq < 0 ||
+      !["idle", "running", "paused", "done"].includes(s.session) || st.net !== w.net) return false;
+  if (!["trades", "wins", "losses", "breakEven", "unresolved"].every(k => Number.isInteger(st[k]) && st[k] >= 0) || st.trades !== st.wins + st.losses + st.breakEven) return false;
+  if (![st.net, st.sumWin, st.sumLoss, st.peak, st.maxDD].every(Number.isFinite)) return false;
+  return s.history.every(h => Number.isInteger(h.n) && h.n > 0 && Number.isFinite(new Date(h.time).getTime()) &&
+    ["win", "loss", "break-even", "unresolved"].includes(h.outcome) && (h.outcome === "unresolved" ? h.pnl === null : Number.isFinite(h.pnl)));
+}
+function applyVirtualSnapshot(s) {
+  state.virtualWallet = s.wallet; state.stats = s.stats; state.history = s.history.map(h => ({ ...h, time: new Date(h.time) }));
+  state.seq = s.seq; state.lastResult = s.lastResult; state.pos = s.openPosition;
+  state.session = ["running", "paused"].includes(s.session) ? "paused" : s.session;
+}
+function saveVirtualState() {
+  if (state.execution !== "simulation") return;
+  const current = captureVirtualState(); state.virtualSaved = current;
+  try { localStorage.setItem(VIRTUAL_KEY, JSON.stringify({ version: 1, current, archives: state.virtualArchives.slice(0, 20) })); }
+  catch { state.storageError = true; }
+}
+function loadVirtualState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(VIRTUAL_KEY) || "null");
+    if (!saved || saved.version !== 1 || !validateVirtualSnapshot(saved.current)) return;
+    state.virtualArchives = (saved.archives || []).filter(validateVirtualSnapshot).slice(0, 20);
+    applyVirtualSnapshot(saved.current); state.virtualStarting = state.virtualWallet.starting;
+    if (state.pos) {
+      const pos = state.pos; state.pos = null; state.session = "done"; state.stats.unresolved++;
+      appendHistory(pos, { outcome: "unresolved", win: false, pnl: null, detail: "Page refreshed while a virtual position was open; missing observations prevent settlement. Reserved stake is not refunded." });
+    }
+    saveVirtualState(); // No sound or result flash when restoring history.
+  } catch { state.storageError = true; }
+}
+function beginVirtualWallet() {
+  const previous = state.virtualWallet && captureVirtualState();
+  if (previous && (previous.history.length || previous.wallet.pending)) {
+    state.virtualArchives = [previous, ...state.virtualArchives.filter(s => s.wallet.id !== previous.wallet.id)].slice(0, 20);
+  }
+  state.virtualWallet = null; ensureVirtualWallet(); state.archiveSelection = "";
+}
+function reserveVirtualStake(pos) {
+  const w = ensureVirtualWallet();
+  if (w.pending || pos.stake > virtualBalance().available) return false;
+  pos.virtualKey = w.id + ":" + (state.seq + 1);
+  w.pending = pos.virtualKey; w.reserved = pos.stake;
+  return true;
+}
+function settleVirtualStake(pos, pnl) {
+  const w = ensureVirtualWallet();
+  if (w.settled.includes(pos.virtualKey) || w.pending !== pos.virtualKey || !Number.isFinite(pnl) || pnl < -pos.stake) return false;
+  w.net = roundMoney(w.net + pnl); w.reserved = 0; w.pending = null; w.settled.push(pos.virtualKey);
+  return true;
+}
+
+function renderVirtualWallet() {
+  const v = virtualBalance();
+  $("wallet-start").textContent = money(v.starting); $("wallet-current").textContent = money(v.current);
+  $("wallet-available").textContent = money(v.available); $("wallet-profit").textContent = fmtSigned(v.net);
+  $("virtual-wallet-note").textContent = state.storageError ? "Browser storage is unavailable; this virtual session may not survive refresh." :
+    (v.reserved ? money(v.reserved) + " reserved" + (state.pos ? " for the open virtual position." : " for an unresolved virtual position; outcome unknown.") : "Virtual money only. Simulated results never change the Deriv account balance.");
+  const input = $("virtual-start-input");
+  if (document.activeElement !== input) input.value = state.virtualStarting.toFixed(2);
+  input.disabled = state.execution !== "simulation" || ["running", "paused"].includes(state.session) || !!state.pos;
+  const selector = $("virtual-session-select"); selector.textContent = "";
+  const current = document.createElement("option"); current.value = ""; current.textContent = "Current virtual session"; selector.appendChild(current);
+  for (const s of state.virtualArchives) {
+    const option = document.createElement("option"); option.value = s.wallet.id;
+    option.textContent = s.wallet.id + " · " + s.stats.trades + " outcomes · " + fmtSigned(s.stats.net); selector.appendChild(option);
+  }
+  selector.value = state.archiveSelection; selector.disabled = state.execution !== "simulation";
 }
 
 function clampStakeToProduct() {
@@ -638,6 +743,7 @@ function simulateTick(price, digit) {
       markDrawdown(state.stats, openPnl(state.pos));
       renderStats();
       renderLastTrade();
+      saveVirtualState();
     }
     return; // never open a new contract on the tick that settled one
   }
@@ -657,12 +763,18 @@ function simulateTick(price, digit) {
     renderStrategy();
   }
   state.pos = openContract(cfg, price);
+  if (!reserveVirtualStake(state.pos)) {
+    state.pos = null; state.session = "done";
+    toast("Insufficient available virtual balance for this stake. Adjust the stake or start a new virtual wallet.", "info");
+    renderControls(); return;
+  }
   state.pos.symbol = state.settings.symbol;
   state.pos.openedAt = new Date();
   markDrawdown(state.stats, openPnl(state.pos));
   renderStats();
   renderLastTrade();
   renderControls();
+  saveVirtualState();
 }
 
 // Statistics only: these helpers do not change the contract pricing/settlement formulas.
@@ -704,6 +816,7 @@ function settle(res) {
   const pos = state.pos;
   if (!pos) return;
   state.pos = null;
+  if (!settleVirtualStake(pos, res.pnl)) return;
   res = { ...res, win: res.pnl > 0, outcome: res.pnl > 0 ? "win" : res.pnl < 0 ? "loss" : "break-even" };
   recordSettlement(state.stats, res);
   appendHistory(pos, res);
@@ -714,6 +827,7 @@ function settle(res) {
   if (res.pnl !== 0) playResultSound(res.win);
   checkSessionLimits();
   renderControls();
+  saveVirtualState();
 }
 
 function contractLabel(pos) {
@@ -758,6 +872,7 @@ function interruptSimulation(reason) {
   renderLastTrade();
   renderControls();
   toast(reason + " Session stopped; any unresolved result is shown in history.", "error");
+  saveVirtualState();
 }
 
 function startSession() {
@@ -774,6 +889,7 @@ function startSession() {
     return;
   }
   if (state.session === "idle" || state.session === "done") {
+    beginVirtualWallet();
     state.stats = freshStats();
     state.history = [];
     state.seq = 0;
@@ -784,6 +900,7 @@ function startSession() {
   }
   state.session = "running";
   renderControls();
+  saveVirtualState();
 }
 
 function pauseSession() {
@@ -791,6 +908,7 @@ function pauseSession() {
   if (state.session !== "running") return;
   state.session = "paused"; // an open contract still settles normally
   renderControls();
+  saveVirtualState();
 }
 
 function stopSession() {
@@ -799,6 +917,7 @@ function stopSession() {
   state.session = "done";
   renderControls();
   toast("Session stopped" + (state.pos ? " — the open contract will settle and be counted." : "."), "info");
+  saveVirtualState();
 }
 
 /* ======================= comparison tool (backtest) ====================== */
@@ -975,6 +1094,58 @@ async function runVirtualResearch() {
 
 /* ------------------------------ REST helpers ----------------------------- */
 
+let educationalEvidence = null;
+function categoryVerdict(c) {
+  if (c.trades > 0 && c.net < 0) return "FAILED";
+  if (c.trades >= 400 && c.activeWindows === 4 && c.positiveWindows === 4 && c.qualifiedWindows === 4) return "SUPPORTED BY EVIDENCE";
+  return "INCONCLUSIVE";
+}
+async function loadEducationalResearch() {
+  try {
+    const response = await fetch("/research-evidence.json", { cache: "no-cache" });
+    if (!response.ok) throw new Error("evidence unavailable");
+    const data = await response.json();
+    if (data.version !== 1 || !Array.isArray(data.categories) || data.categories.length !== 6) throw new Error("invalid evidence");
+    educationalEvidence = data; renderEducationalCategory();
+  } catch { $("educational-verdict").textContent = "Research evidence unavailable. Refresh to retry; no result was substituted."; }
+}
+function renderEducationalCategory() {
+  const c = educationalEvidence?.categories.find(c => c.id === $("educational-category").value);
+  if (!c) return;
+  const range = (values, formatter = money) => {
+    const ns = values.filter(Number.isFinite);
+    return ns.length ? formatter(Math.min(...ns)) + (Math.max(...ns) === Math.min(...ns) ? "" : "–" + formatter(Math.max(...ns))) : "Not established";
+  };
+  const percent = n => (n * 100).toFixed(2) + "%";
+  const priced = c.prices.filter(p => !p.unavailable);
+  const binary = priced.some(p => p.gross != null);
+  $("educational-name").textContent = c.name;
+  $("educational-description").textContent = c.description;
+  $("educational-verdict").textContent = "Research verdict: " + categoryVerdict(c) + " · virtual scenarios only";
+  const values = [
+    ["Hypothetical stake", money(c.hypotheticalStake)],
+    ["Payout source", "Saved public proposals from November 2026, applied to historical prices as assumptions; not authenticated Demo prices"],
+    ["Winning gross payout", binary ? range(priced.map(p => p.gross)) : "Variable modeled exit value; no guaranteed winning payout"],
+    ["Net profit per winning outcome", binary ? range(priced.map(p => p.profit)) : "Observed modeled average " + range(c.observedAverageWinRange)],
+    ["Loss per losing outcome", c.id === "mult" ? "Variable observed average " + range(c.observedAverageLossRange) + "; maximum contractual loss " + money(10) : money(10)],
+    ["Break-even wins", range(binary ? priced.map(p => p.breakEven) : c.empiricalBreakEven, percent) + (binary ? " under the saved payout assumptions" : " for observed outcome mixes, not a fixed future requirement")],
+    ["Observed virtual win rate", c.winRate == null ? "Not established" : percent(c.winRate)],
+    ["Expected value under stated assumptions", binary ? range(priced.map(p => p.expectedValue)) + (c.id === "matches" ? " / entry at theoretical uniform 10% wins" : c.id === "differs" ? " / entry at theoretical uniform 90% wins" : " / entry at illustrative 50% wins; actual barrier probability is unknown") : "Not established without a validated price-path/exit model"],
+    ["Observed mean per virtual outcome", c.meanReturn == null ? "Not established" : money(c.meanReturn) + "; sample mean, not a forecast"],
+    ["Total virtual P/L", fmtSigned(c.net) + " summed across independent test wallets"],
+    ["Maximum drawdown", money(c.maxDrawdown) + " in the worst individual window"],
+    ["Sample size and consistency", c.trades + " outcomes · " + c.positiveWindows + "/" + c.activeWindows + " tradable windows positive · " + c.qualifiedWindows + " qualified"],
+    ["Contract assumptions", priced.map(p => p.symbol + (p.durationSeconds ? ": " + p.durationSeconds + " seconds, upper barrier " + p.barrier : p.growthRate ? ": " + percent(p.growthRate) + " growth, modeled barrier " + p.barrier : p.multiplier ? ": ×" + p.multiplier + ", modeled commission " + money(p.commission) : ": one-tick digit contract")).join("; ")],
+  ];
+  const grid = $("educational-metrics"); grid.textContent = "";
+  for (const [label, value] of values) {
+    const box = document.createElement("div"), dt = document.createElement("dt"), dd = document.createElement("dd");
+    dt.textContent = label; dd.textContent = value; box.append(dt, dd); grid.appendChild(box);
+  }
+  $("educational-limitations").textContent = c.limitations + " " + c.prices.filter(p => p.unavailable).map(p => p.symbol + ": " + p.reason).join("; ");
+  $("educational-history").textContent = "Preserved PR #7 findings: 166 tests; 20,000 evaluation ticks; 23 original references plus 7 alternatives. Old selector −$226.39; rebuilt selector NO TRADE in all four test windows. Touch +$23.50 over 95 virtual outcomes, insufficient consistent evidence. No strategy qualified. These are historical observations, not a future-performance claim.";
+}
+
 function errText(err) {
   if (!err) return "unknown error";
   if (typeof err === "string") return err;
@@ -1008,17 +1179,31 @@ async function demoApi(path, method = "GET", body) {
     headers["Content-Type"] = "application/json";
     if (state.csrf) headers["X-Deriv-CSRF"] = state.csrf;
   }
-  const response = await fetch("/api/deriv" + path, {
+  const bounded = !path.startsWith("/demo/");
+  const controller = bounded ? new AbortController() : null;
+  const timer = bounded ? setTimeout(() => controller.abort(), method === "GET" ? 20000 : 60000) : null;
+  let response, data;
+  try { response = await fetch("/api/deriv" + path, {
     method, headers, credentials: "same-origin", cache: "no-store",
+    ...(controller ? { signal: controller.signal } : {}),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const data = await response.json().catch(() => null);
+    data = await response.json().catch(() => null);
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("Account connection timed out. Retry status; no automatic login or order retry was sent.");
+    throw error;
+  } finally { if (timer != null) clearTimeout(timer); }
   if (!response.ok || !data) {
     const error = new Error(typeof data?.detail === "string" ? data.detail : "Demo request failed. Reconnect and check the session status.");
     error.status = response.status;
     throw error;
   }
   return data;
+}
+
+async function fetchAccountView() {
+  try { return await demoApi("/account-view"); }
+  catch (error) { if (error.status === 404) return demoApi("/session"); throw error; }
 }
 
 async function handleOAuthReturn() {
@@ -1057,20 +1242,24 @@ function loadCred() {
   if (typeof a === "string") state.activeId = a;
 }
 
-async function connectAccounts(silent = false) {
+async function connectAccounts(silent = false, restoring = true) {
   if (state.connecting) return false;
   state.connecting = true;
+  state.accountStatus = "checking"; renderAccount();
   try {
-    const data = await demoApi("/session");
+    const data = await fetchAccountView();
     applyDemoSnapshot(data);
     // Reload never silently resumes actual order submission.
-    if (data.run?.status === "running") {
+    if (restoring && data.run?.status === "running") {
       state.demoHalted = true;
       applyDemoSnapshot(await demoApi("/demo/control", "POST", { action: "pause" }));
     }
     startAccountPolling();
     return true;
   } catch (err) {
+    state.accountStatus = err.status === 401 ? "unauthorised" : "unavailable";
+    state.accountError = err.status === 401 ? "Connect a Demo account to view its balance. Public market data works independently." : errText(err);
+    if (err.status === 401) { state.cred = null; state.account = null; }
     if (!silent) { showConnectError(errText(err)); openConnectDialog(); }
     return false;
   } finally {
@@ -1086,9 +1275,11 @@ function startAccountPolling() {
     if (busy) return;
     busy = true;
     try {
-      applyDemoSnapshot(await demoApi("/session"));
+      applyDemoSnapshot(await fetchAccountView());
     } catch (err) {
       state.demoHalted = true;
+      state.accountStatus = err.status === 401 ? "unauthorised" : "unavailable";
+      state.balanceStatus = "unavailable"; state.accountError = errText(err);
       state.account = null; // Do not present a stale balance as a verified live connection.
       if (err.status === 401) {
         clearInterval(state.accountPoll);
@@ -1105,10 +1296,15 @@ function applyDemoSnapshot(data, reset = false) {
   if (reset) { state.sessionView = data.session_view; state.snapshotRevision = 0; }
   if (state.sessionView && data.session_view !== state.sessionView) return;
   if (data.revision < state.snapshotRevision) return;
+  if (reset || data.account?.id !== state.activeId) state.balanceUpdatedAt = null;
   state.sessionView = data.session_view;
   state.snapshotRevision = data.revision;
   state.csrf = data.csrf;
   state.cred = { kind: "server" };
+  state.accountStatus = "authorised"; state.accountError = null;
+  state.balanceStatus = data.balance_status || (data.connected ? "available" : "unavailable");
+  state.balanceUpdatedAt = data.balance_updated_at || state.balanceUpdatedAt;
+  state.balanceError = data.balance_error || null;
   state.accounts = data.accounts || [];
   state.linkedAccounts = data.linked_accounts || [];
   state.linkedAccountsTime = data.accounts_updated_at || null;
@@ -1119,6 +1315,10 @@ function applyDemoSnapshot(data, reset = false) {
   ssSet(ACTIVE_KEY, state.activeId);
   state.demo = data.run || null;
   if (state.demo?.pending || ["running", "paused"].includes(state.demo?.status)) {
+    if (state.execution === "simulation") {
+      interruptSimulation("An existing Demo session was restored; the separate virtual session is paused.");
+      saveVirtualState(); state.pos = null;
+    }
     state.execution = "demo";
     $("execution-mode").value = "demo";
   }
@@ -1130,6 +1330,7 @@ function applyDemoSnapshot(data, reset = false) {
     }
     state.session = state.demoHalted && run.status === "running" ? "done" : run.status;
     const rows = run.history || [];
+    observeDemoNotifications(run, rows, reset);
     let total = 0;
     const history = [...rows].reverse().map((row, index) => {
       total = Math.round((total + row.profit) * 100) / 100;
@@ -1170,7 +1371,11 @@ async function connectWithToken() {
 
 async function switchAccount(id) {
   if (!id || id === state.activeId) return;
-  try { applyDemoSnapshot(await demoApi("/account", "POST", { account_id: id })); }
+  try {
+    state.balanceUpdatedAt = null; state.balanceStatus = "checking";
+    applyDemoSnapshot(await demoApi("/account", "POST", { account_id: id }));
+    applyDemoSnapshot(await fetchAccountView());
+  }
   catch (err) { toast(errText(err), "error"); renderAccount(); }
 }
 
@@ -1180,6 +1385,7 @@ async function clearCred() {
   state.demoHalted = true;
   state.session = "done";
   state.cred = null; state.csrf = null; state.account = null; state.accounts = [];
+  state.accountStatus = "unauthorised"; state.balanceStatus = "unavailable"; state.balanceUpdatedAt = null;
   state.activeId = null; state.demo = null;
   state.linkedAccounts = []; state.linkedAccountsTime = null; state.linkedAccountsError = null;
   state.sessionView = "disconnected"; // Reject an already in-flight pre-disconnect poll.
@@ -1194,8 +1400,10 @@ function changeExecutionMode() {
     el.value = state.execution;
     return toast("Stop the current session and let its contract finish before changing mode.", "info");
   }
+  if (state.execution === "simulation") saveVirtualState();
   state.execution = el.value;
   state.session = "idle"; state.stats = freshStats(); state.history = []; state.lastResult = null;
+  if (state.execution === "simulation" && state.virtualSaved) applyVirtualSnapshot(state.virtualSaved);
   if (state.execution === "demo" && state.demo) applyDemoSnapshot({ connected: !!state.account, account: state.account,
     accounts: state.accounts, linked_accounts: state.linkedAccounts, accounts_updated_at: state.linkedAccountsTime,
     accounts_error: state.linkedAccountsError, owner: state.owner, csrf: state.csrf, run: state.demo, session_view: state.sessionView, revision: state.snapshotRevision });
@@ -1308,11 +1516,15 @@ function renderAccount() {
   }
   $("linked-accounts-time").textContent = (state.linkedAccountsError ? state.linkedAccountsError + " " : "") +
     (state.linkedAccountsTime ? "Account-list snapshot: " + new Date(state.linkedAccountsTime * 1000).toLocaleTimeString() + ". Refreshes about every 30 seconds." : "");
-  $("connect-button-nav").textContent = acc ? acc.id : state.cred ? "Connecting…" : "Connect";
+  const authorization = state.connecting ? "Checking account authorization…" : state.accountStatus === "authorised" ? "Demo account authorized" :
+    state.accountStatus === "unavailable" ? "Account status unavailable — retry" : "No Demo account authorized";
+  $("account-auth-status").textContent = authorization + (state.accountError ? ". " + state.accountError : "");
+  $("connect-status").textContent = authorization;
+  $("connect-button-nav").textContent = acc ? acc.id : state.connecting ? "Connecting…" : state.cred ? "Reconnect Demo" : "Connect Demo";
   $("account-empty").hidden = !!acc;
   $("account-live").hidden = !acc;
   const sel = $("account-select");
-  sel.hidden = !(acc && state.accounts.length > 1);
+  sel.hidden = !acc;
   if (!acc) return;
   const cur = String(acc.currency).toUpperCase();
   $("account-owner").textContent = state.owner || acc.id;
@@ -1324,6 +1536,9 @@ function renderAccount() {
   const badge = $("account-type");
   badge.textContent = acc.isVirtual ? "Demo" : "Real";
   badge.className = "badge " + (acc.isVirtual ? "badge-demo" : "badge-real");
+  $("account-balance-status").textContent = (state.balanceStatus === "available" ? "Read-only Deriv balance" : "Balance refresh unavailable") +
+    (state.balanceUpdatedAt ? " · last verified " + new Date(state.balanceUpdatedAt * 1000).toLocaleTimeString() : " · waiting for refresh timestamp") +
+    (state.accounts.length === 1 ? " · one authorized Demo account" : "") + (state.balanceError ? ". " + state.balanceError : ". Virtual profit is never added here.");
   if (!sel.hidden) {
     sel.textContent = "";
     for (const a of state.accounts) {
@@ -1384,8 +1599,8 @@ function renderTicket() {
     const quoted = compatible && Number.isFinite(payout) && payout > stake && profit > 0;
     $("tk-stake").textContent = money(stake);
     $("tk-loss").textContent = "−" + money(stake);
-    $("tk-payout").textContent = s.product === "differs" ? quoted ? money(payout) : "Quoted at entry" : "Variable";
-    $("tk-profit").textContent = s.product === "differs" ? quoted ? "+" + money(profit) : "Quoted at entry" : "10% target · not guaranteed";
+    $("tk-payout").textContent = s.product === "differs" ? quoted ? money(payout) : "Awaiting actual return" : "Variable";
+    $("tk-profit").textContent = s.product === "differs" ? quoted ? "+" + money(profit) : "Awaiting actual return" : "10% target · not guaranteed";
     $("tk-note").textContent = quoted ? (settledWin ? "Last actual winning settlement" : "Last authenticated entry quote") + " · digit " + last.digit + " · break-even " + (100 * stake / payout).toFixed(1) + "% wins · one full loss ≈ " + (stake / profit).toFixed(1) + " such wins. Future quotes and returns may differ." :
       "Demo amounts come from the authenticated entry quote and actual Deriv settlement. Public quote estimates are not used here. Maximum contractual loss remains the stake.";
     return;
@@ -1545,14 +1760,17 @@ function renderStats() {
   $("stat-trades").textContent = st.trades + (st.trades === 1 ? " settled trade" : " settled trades") +
     (st.breakEven ? " · " + st.breakEven + " break-even" : "") + (st.unresolved ? " · " + st.unresolved + " unresolved (P/L incomplete)" : "");
   $("stat-dd").textContent = "max equity drawdown " + money(st.maxDD);
+  renderVirtualWallet();
 }
 
 function renderHistory() {
+  const archived = state.execution === "simulation" && state.virtualArchives.find(s => s.wallet.id === state.archiveSelection);
+  const rows = archived ? archived.history.map(h => ({ ...h, time: new Date(h.time) })) : state.history;
   const body = $("trade-history-body");
   body.textContent = "";
-  $("trade-history-empty").hidden = state.history.length > 0;
-  $("history-count").textContent = state.history.length ? "· " + state.history.length : "";
-  for (const t of state.history) {
+  $("trade-history-empty").hidden = rows.length > 0;
+  $("history-count").textContent = (archived ? "· archived session · " : "· ") + rows.length;
+  for (const t of rows) {
     const tr = document.createElement("tr");
     [String(t.n), fmtClock(t.time), t.label, money(t.stake)].forEach((c) => {
       const td = document.createElement("td");
@@ -1572,12 +1790,12 @@ function renderHistory() {
 }
 
 let flashTimer = null;
-function showResultFlash(win, stake, pnl) {
+function showResultFlash(win, stake, pnl, source = "virtual") {
   const el = $("result-flash");
   const ratio = (stake + pnl) / stake;
   const label = pnl === 0 ? "BREAK-EVEN " : win ? "WIN " : "LOSS ";
   el.className = "result-flash " + (pnl === 0 ? "" : win ? "win" : "loss") + (win && ratio >= 3 ? " big" : "");
-  el.innerHTML = '<span class="rf-mult">×' + Math.max(0, ratio).toFixed(2) + '</span><span class="rf-txt">' + label + fmtSigned(pnl) + " (virtual)</span>";
+  el.innerHTML = '<span class="rf-mult">×' + Math.max(0, ratio).toFixed(2) + '</span><span class="rf-txt">' + label + fmtSigned(pnl) + " (" + source + ")</span>";
   el.hidden = false;
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => (el.hidden = true), 1200);
@@ -1588,6 +1806,7 @@ function showResultFlash(win, stake, pnl) {
 
 let audioCtx = null;
 function unlockAudio() {
+  if (!state.settings.sound) return;
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === "suspended") audioCtx.resume();
@@ -1617,11 +1836,28 @@ function playResultSound(win) {
   }
 }
 
+function renderSoundToggle() {
+  $("sound-toggle").textContent = state.settings.sound ? "Sound ON" : "Sound OFF";
+  $("sound-toggle").setAttribute("aria-pressed", String(state.settings.sound));
+}
+function observeDemoNotifications(run, rows, reset) {
+  const key = state.sessionView + ":" + run.id;
+  if (reset || state.noticeRun !== key) {
+    state.noticeRun = key; state.noticeSeen = new Set(rows.map(r => r.id)); return;
+  }
+  for (const row of [...rows].reverse()) {
+    if (state.noticeSeen.has(row.id)) continue;
+    state.noticeSeen.add(row.id);
+    if (row.profit === 0) continue;
+    showResultFlash(row.profit > 0, row.stake, row.profit, "Deriv Demo");
+    playResultSound(row.profit > 0);
+  }
+}
+
 /* ----------------------------- dialogs + toasts -------------------------- */
 
 function openConnectDialog() {
   $("oauth-block").hidden = !state.cfg.oauth_ready;
-  $("oauth-redirect-url").textContent = redirectUri();
   const d = $("connect-dialog");
   if (!d.open) d.showModal();
 }
@@ -1635,6 +1871,7 @@ function showConnectError(m) {
   $("connect-error").textContent = m || "";
 }
 function setConnectBusy(busy) {
+  state.connecting = busy;
   $("token-connect-button").disabled = busy;
   $("token-connect-button").textContent = busy ? "Connecting…" : "Connect";
   renderAccount();
@@ -1681,6 +1918,32 @@ function on(target, event, handler) {
 }
 
 function bindEvents() {
+  on("educational-category", "change", renderEducationalCategory);
+  on("sound-toggle", "click", () => {
+    state.settings.sound = !state.settings.sound;
+    if (state.settings.sound) unlockAudio();
+    else { audioCtx?.close?.(); audioCtx = null; }
+    saveSettings(); renderSoundToggle();
+  });
+  on("virtual-start-input", "change", e => {
+    const value = Number(e.target.value);
+    if (Number.isFinite(value) && value >= .01 && value <= 1e9 && roundMoney(value) === value) {
+      state.virtualStarting = value;
+      if (state.session === "idle" && !state.history.length) state.virtualWallet = null;
+      saveVirtualState();
+    }
+    renderVirtualWallet();
+  });
+  on("virtual-session-select", "change", e => { state.archiveSelection = e.target.value; renderHistory(); });
+  on("account-refresh", "click", async () => {
+    if (state.connecting) return;
+    try {
+      if (state.cred && !state.account && state.activeId && !state.demo?.pending && !["running", "paused"].includes(state.demo?.status)) {
+        applyDemoSnapshot(await demoApi("/account", "POST", { account_id: state.activeId }));
+      }
+      await connectAccounts(false, false);
+    } catch (error) { state.accountError = errText(error); state.accountStatus = "unavailable"; renderAccount(); }
+  });
   const sel = $("symbol-select");
   if (sel) {
     for (const [code, name] of SYMBOLS) sel.add(new Option(name, code));
@@ -1739,8 +2002,11 @@ function bindEvents() {
 async function init() {
   loadSettings();
   loadCred();
+  loadVirtualState();
   bindEvents();
   renderAll();
+  renderSoundToggle();
+  void loadEducationalResearch();
   await loadConfig();
   connectPublic();
   const handled = await handleOAuthReturn();

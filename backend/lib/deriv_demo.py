@@ -178,10 +178,6 @@ class Session:
     session_view: str = field(default_factory=lambda: secrets.token_hex(12))
     revision: int = 0
     accounts: list = field(default_factory=list)
-    linked_accounts: list = field(default_factory=list)
-    accounts_updated_at: float | None = None
-    accounts_checked_at: float = 0
-    accounts_error: str | None = None
     account: dict | None = None
     owner: str | None = None
     channel: object = field(default=None, repr=False)
@@ -204,8 +200,6 @@ class Session:
         self.revision += 1
         return {"connected": self.connected, "csrf": self.csrf, "session_view": self.session_view,
                 "revision": self.revision, "accounts": self.accounts,
-                "linked_accounts": self.linked_accounts, "accounts_updated_at": self.accounts_updated_at,
-                "accounts_error": self.accounts_error,
                 "account": self.account, "owner": self.owner, "expires_at": self.expires,
                 "run": {"id": self.run_id, "status": self.status, "net": self.net,
                         "history": self.history, "pending": self.pending, "error": self.error}}
@@ -235,29 +229,6 @@ class Broker:
             raise DemoError("Deriv returned an unexpected account response.", 502)
         return raw
 
-    async def refresh_account_views(self, s, raw=None):
-        """REST-only information; Real accounts never become execution selections."""
-        if raw is None and time.time() - s.accounts_checked_at < 30:
-            return
-        s.accounts_checked_at = time.time()
-        try:
-            raw = raw if raw is not None else await self.list_accounts(s)
-            views = []
-            for a in raw:
-                if a.get("status") != "active" or a.get("account_type") not in {"demo", "real"}:
-                    continue
-                if not isinstance(a.get("account_id"), str) or not isinstance(a.get("currency"), str):
-                    continue
-                try:
-                    balance = amount(a.get("balance"))
-                except DemoError:
-                    continue  # Never substitute a fabricated balance.
-                views.append({"id": a["account_id"], "type": a["account_type"], "currency": a["currency"],
-                              "balance": balance, "read_only": True})
-            s.linked_accounts, s.accounts_updated_at, s.accounts_error = views, time.time(), None
-        except DemoError:
-            s.accounts_error = "Account-list refresh failed. Listed balances retain their last successful timestamp."
-
     async def create(self, token, kind, expires, origin):
         for key, old in list(self.sessions.items()):
             if old.expires <= time.time():
@@ -273,7 +244,6 @@ class Broker:
             raise DemoError("Too many active account sessions. Disconnect an unused session first.", 429)
         s = Session(token=token, kind=kind, expires=time.time() + min(expires, 3600), origin=origin)
         raw = await self.list_accounts(s)
-        await self.refresh_account_views(s, raw)
         demos = [a for a in raw if a.get("account_type") == "demo" and a.get("status") == "active" and a.get("currency") == "USD"]
         if not demos:
             raise DemoError("No active USD Options Demo account was returned. Live-account execution is blocked.", 403)
@@ -368,7 +338,7 @@ class Broker:
 
     @staticmethod
     def order_public(order):
-        return {k: order.get(k) for k in ("id", "contract_id", "product", "stake", "symbol", "digit", "label", "profit", "status", "opened_at", "closed_at", "buy_price", "sell_price", "quoted_payout", "quoted_profit", "quoted_at")}
+        return {k: order.get(k) for k in ("id", "contract_id", "product", "stake", "symbol", "digit", "label", "profit", "status", "opened_at", "closed_at", "buy_price", "sell_price")}
 
     def limit_reached(self, s):
         c = s.cfg
@@ -434,13 +404,6 @@ class Broker:
         price = amount(proposal.get("ask_price"))
         if not proposal.get("id") or price <= 0 or price != c.stake:
             raise DemoError("The authenticated Demo quote does not match the requested stake.", 502)
-        # Display metadata only: unavailable quote details must not change execution.
-        quoted_payout = None
-        if c.product == "differs":
-            with contextlib.suppress(DemoError):
-                value = amount(proposal.get("payout"))
-                if value > price:
-                    quoted_payout = value
         order_id = s.run_id + ":" + str(tick["epoch"])
         try:
             await self.db.demo_account_locks.find_one_and_update(
@@ -451,8 +414,6 @@ class Broker:
             raise DemoError("Another Demo order is active or unresolved; no duplicate was submitted.", 409) from None
         order = {"_id": order_id, "id": order_id, "run_id": s.run_id, "account_id": s.account["id"],
                  "config": c.model_dump(), "product": c.product, "stake": c.stake, "symbol": c.symbol,
-                 "quoted_payout": quoted_payout, "quoted_profit": amount(quoted_payout - price) if quoted_payout is not None else None,
-                 "quoted_at": time.time(),
                  "digit": c.digit, "label": {"differs": f"Differs {c.digit}", "accu": f"Accumulator {c.growth:.0%}", "mult": f"Multiplier ×{c.mult} {c.direction}"}[c.product],
                  "status": "ordering", "profit": None, "opened_at": time.time(), "contract_id": None}
         try:

@@ -19,7 +19,7 @@ before(async () => {
       res.end(JSON.stringify({ oauth_ready: false }));
       return;
     }
-    const files = { "/": "index.html", "/app.js": "public/app.js", "/research.js": "public/research.js", "/styles.css": "public/styles.css", "/favicon.svg": "public/favicon.svg" };
+    const files = { "/": "index.html", "/app.js": "public/app.js", "/research.js": "public/research.js", "/research-evidence.json": "public/research-evidence.json", "/styles.css": "public/styles.css", "/favicon.svg": "public/favicon.svg" };
     const file = files[req.url];
     if (!file) { res.writeHead(404).end(); return; }
     res.setHeader("Content-Type", file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" : file.endsWith(".svg") ? "image/svg+xml" : "text/html");

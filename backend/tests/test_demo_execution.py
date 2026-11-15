@@ -163,10 +163,12 @@ async def test_connection_is_demo_only_and_contains_no_credentials():
 
 
 @pytest.mark.asyncio
-async def test_authorized_real_accounts_are_rest_only_views_never_execution_selections():
+async def test_authorized_real_accounts_are_rest_only_views_never_execution_selections(monkeypatch):
     b = FakeBroker()
     s = await b.create(TOKEN, "oauth", 3600, ORIGIN)
-    views = s.public()["linked_accounts"]
+    from routers import deriv, account_view
+    monkeypatch.setattr(deriv, "_broker", b)
+    views = (await account_view.account_view(s))["linked_accounts"]
     assert {a["type"] for a in views} == {"demo", "real"}
     assert all(a["read_only"] for a in views)
     assert [a["id"] for a in s.accounts] == ["DOT-test"]
@@ -179,21 +181,26 @@ async def test_authorized_real_accounts_are_rest_only_views_never_execution_sele
 
 
 @pytest.mark.asyncio
-async def test_read_only_views_throttle_refresh_and_keep_timestamped_values_on_failure():
+async def test_read_only_views_throttle_refresh_and_keep_timestamped_values_on_failure(monkeypatch):
+    from routers import deriv, account_view
     b = FakeBroker()
+    monkeypatch.setattr(deriv, "_broker", b)
     s = await b.create(TOKEN, "oauth", 3600, ORIGIN)
-    before = copy.deepcopy(s.linked_accounts)
-    updated_at = s.accounts_updated_at
+    before = await account_view.account_view(s)
     calls = len(b.rest_calls)
-    await b.refresh_account_views(s)
+    await account_view.account_view(s)
     assert len(b.rest_calls) == calls
     async def unavailable(*args):
         raise DemoError("mock upstream unavailable", 502)
     b.rest = unavailable
-    s.accounts_checked_at = 0
-    await b.refresh_account_views(s)
-    assert s.linked_accounts == before and s.accounts_updated_at == updated_at
-    assert "refresh failed" in s.accounts_error.lower()
+    s.channel.request = unavailable
+    account_view._cache[s.sid].update(next_accounts=0, next_balance=0)
+    after = await account_view.account_view(s)
+    assert after["linked_accounts"] == before["linked_accounts"]
+    assert after["accounts_updated_at"] == before["accounts_updated_at"]
+    assert after["balance_updated_at"] == before["balance_updated_at"]
+    assert "refresh failed" in after["accounts_error"].lower()
+    assert after["balance_status"] == "unavailable"
     assert not any("buy" in p or "sell" in p for p in s.channel.calls)
     await b.shutdown()
 
@@ -227,7 +234,7 @@ async def test_missing_payout_metadata_does_not_change_demo_execution_decisions(
         return response
     s.channel.request = no_display_payout
     await b.signal(s)
-    assert s.pending["digit"] == 7 and s.pending["quoted_payout"] is None
+    assert s.pending["digit"] == 7 and "quoted_payout" not in s.pending
     assert len([p for p in s.channel.calls if "buy" in p]) == 1
     await b.shutdown()
 
@@ -537,4 +544,42 @@ async def test_recovery_does_not_double_count_a_settlement_persisted_before_lock
     await recovered.monitor
     assert recovered.net == 7.5 and len(recovered.history) == 1
     assert b.db.demo_account_locks.rows["DOT-test"]["state"] == "idle"
+    await b.shutdown()
+
+
+def test_display_adapter_is_private_and_does_not_change_execution_files(demo_http):
+    import subprocess
+    from pathlib import Path
+    client, b = demo_http
+    assert client.get("/api/deriv/account-view").status_code == 401
+    login = client.post("/api/deriv/session", json={"token": TOKEN}, headers={"Origin": ORIGIN})
+    result = client.get("/api/deriv/account-view")
+    assert result.status_code == 200 and result.headers["cache-control"] == "no-store, private"
+    assert result.json()["balance_status"] == "available"
+    assert result.json()["balance_updated_at"] > 0
+    assert TOKEN not in result.text and "otp=" not in result.text
+    assert not any("buy" in p or "sell" in p for s in b.sessions.values() for p in s.channel.calls)
+    root = Path(__file__).resolve().parents[2]
+    for path in ["backend/lib/deriv_demo.py", "backend/routers/deriv.py"]:
+        assert (root / path).read_bytes() == subprocess.check_output(["git", "show", "a5556bc:" + path], cwd=root)
+
+
+@pytest.mark.asyncio
+async def test_display_refresh_cannot_apply_an_old_accounts_balance_after_switching(monkeypatch):
+    from routers import deriv, account_view
+    b = FakeBroker()
+    monkeypatch.setattr(deriv, "_broker", b)
+    s = await b.create(TOKEN, "oauth", 3600, ORIGIN)
+    old = s.channel
+    async def delayed(payload):
+        s.account = {**s.account, "id": "DOT-second", "balance": 2500}
+        s.channel = FakeChannel(None, None)
+        return {"balance": {"currency": "USD", "balance": 999999}}
+    old.request = delayed
+    result = await account_view.account_view(s)
+    assert result["account"]["balance"] == 2500
+    assert result["balance_updated_at"] is None
+    s.channel.balance = 2500
+    result = await account_view.account_view(s)
+    assert result["account"]["balance"] == 2500 and result["balance_updated_at"]
     await b.shutdown()

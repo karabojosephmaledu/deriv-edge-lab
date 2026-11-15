@@ -175,3 +175,7 @@ See [the complete research report and completion checklist](research/REVIEW.md) 
 The rebuild retains all 23 earlier references and adds seven virtual-only alternatives. It fixes the biased random reference, premature rounding in empirical break-even, and weak payout validation. A strict research screen returns **NO TRADE** when evidence or risk constraints are not met; no fixed-strategy fallback is promoted and no research result configures Demo orders. The live/manual Demo path is unchanged.
 
 See [the before/after report and all-strategy comparison](research/REBUILD-V2.md). The implementation/protocol were frozen before collecting 20,000 separate public evaluation ticks. None of the candidates qualified; the old selector lost an estimated $226.39 on the new test windows while the rebuilt decision abstained. This is not a claim of profitable trading. Reproduce with `node scripts/evaluate-v2.cjs`; no account or new dependencies are needed. PR #5 is the safe foundation, draft PR #6 is an unapplied execution archive, and the v2 research work is a separate review branch. Nothing should merge/deploy without approval.
+
+## Website restoration release
+
+See [the restoration report](research/WEBSITE-RESTORATION.md) for restored sounds, authorized account display, persistent separate virtual wallets, six educational categories, verification and limitations. Historical PR #7 results remain in [the fixed-protocol report](research/REBUILD-V2.md). The Render build still uses the existing static files and Python backend; no new service or dependency is required.

@@ -58,7 +58,7 @@ function harness(script = source) {
     changeSetting, renderControls, renderStats, renderHistory, renderLastTrade,
     openContract, stepContract, runBacktest, currentCfg, lastDigit, coldestDigit, entryAllowed,
     differsMultiplier, accuParams, multCommissionRate, fetchContractInfo, subscribeDigitPayouts, applyDigitProposal,
-    clampStakeToProduct, checkSessionLimits })`, context);
+    clampStakeToProduct, checkSessionLimits, ...(typeof reserveVirtualStake === "function" ? { reserveVirtualStake, settleVirtualStake, virtualBalance, captureVirtualState, validateVirtualSnapshot } : {}) })`, context);
   api.state.status = "live";
   api.state.lastTick = { symbol: "R_100", epoch: 1000 };
   api.state.pub = { isOpen: () => true, request: async () => ({}) };
@@ -434,4 +434,25 @@ test("regression: $100 Accumulator wins retain the original payouts at every gro
     assert.equal(pos.ticks, ticks);
     assert.equal(result.pnl, profit);
   }
+});
+
+
+test("virtual wallet rejects duplicate settlement and stake beyond available funds", () => {
+  const a = harness(), pos = { stake: 100 };
+  assert.equal(a.reserveVirtualStake(pos), true);
+  assert.equal(a.virtualBalance().available, 900);
+  assert.equal(a.reserveVirtualStake({stake:1}), false);
+  assert.equal(a.settleVirtualStake(pos, 9), true);
+  assert.equal(a.settleVirtualStake(pos, 9), false);
+  assert.equal(a.virtualBalance().current, 1009);
+  assert.equal(a.reserveVirtualStake({stake:1010}), false);
+});
+
+test("virtual persistence refuses corrupt balances and inconsistent outcome counts", () => {
+  const a = harness();
+  const saved = a.captureVirtualState();
+  assert.equal(a.validateVirtualSnapshot(saved), true);
+  assert.equal(a.validateVirtualSnapshot({...saved, wallet:{...saved.wallet, reserved:1001}}), false);
+  assert.equal(a.validateVirtualSnapshot({...saved, stats:{...saved.stats, trades:1}}), false);
+  assert.equal(a.validateVirtualSnapshot({...saved, wallet:{...saved.wallet, net:10}}), false);
 });
