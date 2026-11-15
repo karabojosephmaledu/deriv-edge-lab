@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "purpose": "Virtual-only comparison; no research result can configure account execution",
+  "development_data": "public-sample.json (previously inspected; never called unseen again)",
+  "evaluation_windows_utc": ["2026-11-12T12:00:00Z", "2026-11-14T12:00:00Z"],
+  "markets": ["R_100", "R_25"],
+  "ticks_per_window": 5000,
+  "split": {"training": 0.4, "validation": 0.2, "test": 0.4, "warmup_ticks": 200},
+  "evaluation_wallet": {"balance": 1000, "stake": 10, "staking": "flat"},
+  "criteria": {
+    "minimum_training_trades": 100,
+    "minimum_validation_trades": 100,
+    "maximum_full_stake_fraction": 0.02,
+    "maximum_validation_drawdown_fraction": 0.2,
+    "minimum_trades_per_chronological_block": 20,
+    "chronological_blocks": 4,
+    "familywise_alpha": 0.05,
+    "minimum_comparison_count": 32,
+    "winning_return_haircut_fraction_of_stake": 0.025,
+    "require_positive_training_and_all_validation_blocks": true,
+    "require_positive_multiplicity_adjusted_net_return_lower_bound": true,
+    "require_positive_cost_stress_validation": true,
+    "variable_exit_models_eligible_for_selection": false
+  },
+  "new_candidates": ["diff-evidence", "matches-evidence", "over-evidence", "under-evidence", "rise-revert", "mult-cost", "diff-random-v2"],
+  "benchmarks": "All 23 earlier references retained without changes to their default settlement rules",
+  "no_trade": "No selected strategy, no fallback, no projected stake, zero selected exposure; benchmark studies remain separate",
+  "stop_rule": "Freeze implementation before reading evaluation data. No parameter tuning after inspecting test results. Fixes after unblinding must be disclosed and the data cannot be relabelled unseen.",
+  "pricing": "Reuse saved public quote scenarios, not historical executable or authenticated prices. Haircut is an adverse sensitivity scenario, not an asserted actual fee.",
+  "evidence_limit": "Concentration bounds assume independent bounded binary returns. They do not prove a persistent edge or account-executable profitability. No three-month forward test is claimed."
+}

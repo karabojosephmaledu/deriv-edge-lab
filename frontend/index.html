@@ -256,15 +256,22 @@
             <button class="btn btn-primary" id="research-run" type="button">Compare virtual strategies</button>
             <p class="hint" id="research-status" role="status" aria-live="polite"></p>
             <div class="table-wrap" id="research-output" hidden>
+              <p class="hint" id="research-decision" role="status" aria-live="polite"></p>
               <table class="table"><caption>Held-out results · estimates, not actual account trades</caption>
                 <thead><tr><th>Strategy</th><th>Trades / wins</th><th>Net P/L</th><th>Avg win / loss</th><th>Break-even wins</th><th>Max drawdown</th><th>Longest losses</th><th>Status</th></tr></thead>
                 <tbody id="research-body"></tbody>
               </table>
               <p class="hint" id="research-selection"></p>
-              <table class="table"><caption>Virtual staking risk · Martingale is a risk example only</caption>
+              <table class="table"><caption>Qualified research candidate only · empty for NO TRADE</caption>
                 <thead><tr><th>Staking model</th><th>Trades</th><th>Net P/L</th><th>Max drawdown</th><th>Available balance</th><th>Status</th></tr></thead>
                 <tbody id="research-staking"></tbody>
               </table>
+              <details><summary>Unselected fixed-Differs staking benchmarks · risk examples only</summary>
+                <table class="table"><caption>Original reference, not a fallback recommendation</caption>
+                  <thead><tr><th>Model</th><th>Trades</th><th>Net P/L</th><th>Max drawdown</th><th>Available balance</th><th>Status</th></tr></thead>
+                  <tbody id="research-benchmark-staking"></tbody>
+                </table>
+              </details>
               <p class="hint" id="research-caveat"></p>
             </div>
           </details>

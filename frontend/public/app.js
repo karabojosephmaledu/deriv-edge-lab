@@ -914,6 +914,16 @@ async function runVirtualResearch() {
     const history = await pub.request({ ticks_history: symbol, count: 1000, end: "latest", style: "ticks" }, 30000);
     const data = { symbol, prices: (history.history?.prices || []).map(Number), times: history.history?.times || [], pip: Number(history.pip_size) };
     engine.validate(data);
+    for (let page = 0; page < 2; page++) {
+      const end = data.times[0] - (symbol.startsWith("1HZ") ? 1 : 2);
+      const interval = symbol.startsWith("1HZ") ? 1 : 2;
+      const older = await pub.request({ ticks_history: symbol, count: 1000, start: end - interval * 1000, end: String(end), style: "ticks" }, 30000);
+      const chunk = { symbol, prices: (older.history?.prices || []).map(Number), times: older.history?.times || [], pip: Number(older.pip_size) };
+      engine.validate(chunk);
+      if (chunk.pip !== data.pip || chunk.times.at(-1) !== end) throw new Error("Historical pages overlap, miss ticks or have inconsistent precision.");
+      data.prices.unshift(...chunk.prices); data.times.unshift(...chunk.times);
+      engine.validate(data);
+    }
     const specs = engine.quoteSpecs(symbol, data.prices.at(-1), { stake: options.stake, mult, growth });
     const quotes = {};
     let failed = 0;
@@ -944,14 +954,18 @@ async function runVirtualResearch() {
       const be = r.quotedBreakEven ? percentage(r.quotedBreakEven[0]) + (Math.abs(r.quotedBreakEven[1] - r.quotedBreakEven[0]) > .0001 ? "–" + percentage(r.quotedBreakEven[1]) : "") : r.empiricalBreakEven == null ? "Not established" : percentage(r.empiricalBreakEven) + " (observed mix)";
       row(body, [candidate.name, r.trades + " / " + percentage(r.winRate), fmtSigned(r.net),
         (r.averageWin == null ? "—" : money(r.averageWin)) + " / " + (r.averageLoss == null ? "—" : money(r.averageLoss)),
-        be, money(r.maxDD), r.maxLossStreak, r.status + (r.unavailable ? " · " + r.unavailable + " unquoted signals" : "")]);
+        be, money(r.maxDD), r.maxLossStreak, candidate.classification + " · " + r.status +
+          (candidate.assessment.eligible ? " · validation-qualified for research only" : " · " + candidate.assessment.reasons.join("; "))]);
     }
     const staking = $("research-staking"); staking.textContent = "";
     for (const r of report.staking) row(staking, [r.staking + (r.staking === "martingale3" ? " · RISK EXAMPLE" : ""), r.trades,
       fmtSigned(r.net), money(r.maxDD), money(r.available), r.status]);
+    $("research-decision").textContent = report.decision + (report.selected ? ": " + report.selected : ": no research position or stake selected");
+    const examples = $("research-benchmark-staking"); examples.textContent = "";
+    for (const r of report.benchmarkStaking) row(examples, [r.staking, r.trades, fmtSigned(r.net), money(r.maxDD), money(r.available), "Unselected benchmark only · " + r.status]);
     $("research-selection").textContent = report.decision + ". " + report.selectionNote +
       (report.selected ? " Staking reference: " + report.stakingReference + "." : " No staking projection is made.") + " Selection never uses the held-out results. No strategy is promoted to the bot.";
-    $("research-caveat").textContent = report.caveat + " A maximum-duration buffer prevents contracts crossing evaluation boundaries; short phases can be too short for long contracts. Binary open positions are valued at cost, not an invented resale quote; their final P/L is unknown. Multiplier stops use observed prices and can slip beyond intended limits. Progressive stakes scale snapshot quotes approximately and may change real pricing. Paroli increases exposure after wins; Martingale increases it after losses and stops after three levels or insufficient funds.";
+    $("research-caveat").textContent = report.caveat + " Screening requires at least 100 training and 100 validation trades, no more than 2% full-stake exposure, positive evidence in four validation blocks, a multiple-comparison net-return bound and a 2.5%-of-stake winning-return haircut sensitivity check. The haircut is not an asserted fee; probability bounds assume independent bounded returns. Variable-exit models remain benchmarks until their historical pricing is validated. Test classifications are retrospective and never select the candidate. A maximum-duration buffer prevents boundary leakage; small samples can be inconclusive. This study cannot start, stop or configure your separate Demo session. Stops use observed prices and may slip; progressive stakes use approximate quote scaling.";
     status.textContent = symbol + " · " + data.prices.length + " ticks · " + new Date(data.times[0] * 1000).toISOString() + " to " + new Date(data.times.at(-1) * 1000).toISOString() +
       ". First 40% training (200-tick warm-up), next 20% validation, final 40% held out. " + failed + " unavailable quotes/models; no substitute payouts. All results use the separate virtual wallet.";
     $("research-output").hidden = false;

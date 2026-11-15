@@ -48,7 +48,7 @@ test("changing every holdout price cannot change validation selection", () => {
 
 test("complete-phase buffers avoid an unresolved tail suppressing every candidate by construction", () => {
   const report = R.compare(data(), quotes(), { stake: 1, balance: 1000 });
-  assert.notEqual(report.selected, null);
+  assert.equal(report.selected, null); // 66 validation trades do not meet the new 100-trade requirement.
   assert.equal(report.rows.find(r => r.id === "diff-fixed").validation.unresolved, 0);
   assert.ok(report.rows.every(r => r.holdout.unresolved === 0));
 });

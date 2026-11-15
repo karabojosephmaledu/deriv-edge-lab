@@ -60,7 +60,7 @@ async function dashboard(t, viewport = { width: 1440, height: 900 }) {
         } };
         if (q.ticks_history) msg = { history: {
           prices: Array.from({ length: 1000 }, (_, i) => 100 + ((i * 7) % 10) / 100),
-          times: Array.from({ length: 1000 }, (_, i) => 1700000000 + i * 2),
+          times: Array.from({ length: 1000 }, (_, i) => q.start == null ? 1700000000 + i * 2 : Number(q.end) - 1998 + i * 2),
         }, pip_size: 2 };
         if (q.ticks) this.symbol = q.ticks;
         setTimeout(() => this.onmessage?.({ data: JSON.stringify({ ...msg, req_id: q.req_id }) }), 0);
@@ -177,12 +177,14 @@ test("browser: virtual research compares contracts and staking without changing 
   await page.locator("#research-balance").fill("1");
   await page.locator("#research-run").click();
   await page.locator("#research-output").waitFor({ state: "visible" });
-  assert.equal(await page.locator("#research-body tr").count(), 23);
+  assert.equal(await page.locator("#research-body tr").count(), 30);
   const noTrade = (await page.locator("#research-selection").innerText()).includes("NO TRADE");
   assert.equal(await page.locator("#research-staking tr").count(), noTrade ? 0 : 4);
   assert.match(await page.locator("#research-status").innerText(), /final 40% held out/);
   assert.match(await page.locator("#research-body").innerText(), /stake outside configured contract limits/);
   assert.match(await page.locator("#research-caveat").innerText(), /not historical executable quotes/);
+  assert.match(await page.locator("#research-decision").innerText(), /^NO TRADE/);
+  assert.equal(await page.locator("#research-benchmark-staking tr").count(), 4);
   assert.equal(await page.locator("#stat-pnl").innerText(), "$0.00");
   assert.equal(await page.evaluate(() => state.execution), "simulation");
   assert.equal(await page.evaluate(() => window.__requests.some(q => q.buy || q.sell || q.authorize)), false);
