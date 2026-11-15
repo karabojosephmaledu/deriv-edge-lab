@@ -1,4 +1,4 @@
-/* Current production UI; all provider/private responses are controlled local data. */
+/* Archived manual-dashboard regressions using frozen markup/controller; current UI is tested in simple-auto-browser.test.cjs. */
 const {test,before,after}=require('node:test');
 const assert=require('node:assert/strict');
 const {createServer}=require('node:http');
@@ -28,7 +28,7 @@ before(async()=>{
   }
   const files={'/':'index.html','/account.js':'public/account.js','/matches-simulator.js':'public/matches-simulator.js','/matches-lab.js':'public/matches-lab.js','/styles.css':'public/styles.css','/favicon.svg':'public/favicon.svg','/research-evidence.json':'public/research-evidence.json'};
   if(!files[url.pathname]){res.writeHead(404).end();return;}
-  res.setHeader('Content-Type',url.pathname.endsWith('.js')?'text/javascript':url.pathname.endsWith('.css')?'text/css':url.pathname.endsWith('.json')?'application/json':'text/html');res.end(fs.readFileSync(path.join(root,files[url.pathname])));
+  res.setHeader('Content-Type',url.pathname.endsWith('.js')?'text/javascript':url.pathname.endsWith('.css')?'text/css':url.pathname.endsWith('.json')?'application/json':'text/html');res.end(fs.readFileSync(url.pathname==='/'?path.join(__dirname,'fixtures/manual-matches-dashboard.html'):url.pathname==='/matches-lab.js'?path.join(__dirname,'fixtures/manual-matches-lab.js'):path.join(root,files[url.pathname])));
  });
  await new Promise(r=>server.listen(0,'127.0.0.1',r));origin='http://127.0.0.1:'+server.address().port;
  browser=await chromium.launch({headless:true,executablePath:'/usr/bin/chromium'});

@@ -33,7 +33,7 @@
             </svg>
           </span>
           <span class="brand-name">Deriv Edge Lab</span>
-          <span class="badge badge-sim" id="mode-badge" data-testid="mode-badge">Accounts · view only</span>
+          <span class="badge badge-sim" id="mode-badge" data-testid="mode-badge">Practice · account view</span>
         </div>
         <div class="topbar-actions">
           <button class="btn btn-outline btn-sm" id="sound-toggle" type="button" aria-pressed="true">Sound ON</button>
@@ -52,7 +52,7 @@
           <div class="card-kicker">Deriv account</div>
           <p class="hint" id="account-auth-status" role="status">Checking account authorization…</p>
           <div id="account-empty">
-            <p class="muted account-copy">Connect your Deriv account to see genuine Demo or Real balances. Credentials stay on the secure backend.</p>
+            <p class="muted account-copy">Your genuine Demo or Real balance appears here after login.</p>
             <button class="btn btn-primary" id="connect-button" data-testid="connect-button" type="button">Connect with Deriv</button>
           </div>
           <div id="account-live" hidden>
@@ -106,78 +106,31 @@
 
 
       <section class="card" id="matches-testing" aria-labelledby="matches-testing-title">
-        <div class="card-kicker" id="matches-testing-title">Digit Matches · live-data virtual testing</div>
+        <div class="card-kicker" id="matches-testing-title">Automatic Digit Matches · practice only</div>
         <div class="research-fields">
-          <label class="field-label">Preset<select class="select" id="matches-preset"><option value="fixed">Fixed-Stake</option><option value="growth">Video Growth Strategy</option></select></label>
-          <label class="field-label">Match digit<select class="select" id="matches-digit" aria-label="Digit to match"></select></label>
-          <label class="field-label">Fixed virtual stake ($)<input class="input" id="matches-stake" type="number" min="0.35" max="5000" step="0.01" value="1.00" /></label>
-          <label class="field-label">Session profit target ($)<input class="input" id="matches-target" type="number" min="0.01" step="0.01" placeholder="Optional" /></label>
-          <label class="field-label">Total loss limit ($)<input class="input" id="matches-loss" type="number" min="0.01" step="0.01" placeholder="Optional" /></label>
+          <label class="field-label">Stake ($)<input class="input" id="matches-stake" type="number" min="0.35" max="5000" step="0.01" value="0.35" /></label>
+          <label class="field-label">Session profit target ($)<input class="input" id="matches-target" type="number" min="0.01" step="0.01" value="1.00" /></label>
+          <label class="field-label">Total loss limit ($)<input class="input" id="matches-loss" type="number" min="0.01" step="0.01" value="1.00" /></label>
         </div>
-        <p class="hint" id="matches-stage">Fixed stake · $1.00 per virtual entry</p>
-        <p class="hint" id="matches-preset-note">Same selected digit and stake throughout the session. No Martingale or loss-based stake increases.</p>
+        <p class="hint" id="matches-auto-digit" aria-live="polite">The digit is chosen automatically.</p>
         <div class="run-row">
           <button class="btn btn-primary btn-lg" id="matches-start" type="button">Start</button>
           <button class="btn btn-outline btn-lg" id="matches-pause" type="button" disabled>Pause</button>
           <button class="btn btn-stop btn-lg" id="matches-stop" type="button" disabled>Stop</button>
         </div>
-        <p class="hint" id="matches-status" role="status">Waiting for live Deriv data.</p>
-        <p class="hint" id="matches-quote">Payout requires a current public Deriv Matches quote. No substitute payout is used.</p>
+        <p class="hint" id="matches-status" role="status">Waiting for live prices.</p>
+        <p class="hint" id="matches-quote">A current Deriv quote is required before each entry.</p>
         <div class="metric-grid">
-          <div class="tile"><span class="tile-label">Virtual wins</span><span class="tile-value win" id="matches-wins">0</span></div>
-          <div class="tile"><span class="tile-label">Virtual losses</span><span class="tile-value loss" id="matches-losses">0</span></div>
-          <div class="tile"><span class="tile-label">Virtual win rate</span><span class="tile-value" id="matches-rate">—</span></div>
-          <div class="tile"><span class="tile-label">Virtual session P/L</span><span class="tile-value" id="matches-pnl">$0.00</span></div>
+          <div class="tile"><span class="tile-label">Wins</span><span class="tile-value win" id="matches-wins">0</span></div>
+          <div class="tile"><span class="tile-label">Losses</span><span class="tile-value loss" id="matches-losses">0</span></div>
+          <div class="tile"><span class="tile-label">Win rate</span><span class="tile-value" id="matches-rate">—</span></div>
+          <div class="tile"><span class="tile-label">Practice P/L</span><span class="tile-value" id="matches-pnl">$0.00</span></div>
         </div>
-        <p class="hint" id="matches-count">0 settled virtual outcomes.</p>
-        <div class="table-wrap history-scroll matches-history"><table class="table"><thead><tr><th># / time</th><th>Digit / result</th><th>Virtual stake</th><th>Virtual P/L</th></tr></thead><tbody id="matches-history"></tbody></table></div>
-        <p class="hint">Simulation only: an entry opens on a live tick after its quote arrives and settles on the following tick. Public quotes are pricing assumptions, not actual contracts or guaranteed historical fills. Your genuine account balance above stays separate.</p>
-      </section>
-
-      <section class="card metrics-card" data-testid="session-metrics-card">
-        <div class="card-kicker" id="session-label">Recent settled contracts · genuine Deriv activity</div>
-        <div class="metric-grid">
-          <div class="tile"><span class="tile-label">Wins</span><span class="tile-value win" id="stat-wins">—</span></div>
-          <div class="tile"><span class="tile-label">Losses</span><span class="tile-value loss" id="stat-losses">—</span></div>
-          <div class="tile"><span class="tile-label">Win rate</span><span class="tile-value" id="stat-win-rate">—</span></div>
-          <div class="tile"><span class="tile-label">Net P/L</span><span class="tile-value" id="stat-pnl">—</span></div>
-        </div>
-        <p class="hint" id="settled-status" role="status">Connect an account to view its recent provider settlements.</p>
-        <p class="hint">Balances change only when Deriv processes genuine account transactions. Choosing an account or viewing research does not place an order.</p>
+        <p class="hint" id="matches-count">0 completed practice entries.</p>
         <div class="result-flash" id="result-flash" hidden></div>
         <div class="sr-only" aria-live="polite" id="result-announcer"></div>
       </section>
-      <div class="grid-bottom">
-        <section class="card history-card" data-testid="trade-history-card">
-          <div class="card-kicker">Account transactions · returned by Deriv</div>
-          <p class="hint" id="transaction-status" role="status">No account selected.</p>
-          <div class="table-wrap history-scroll">
-            <table class="table"><thead><tr><th>Time</th><th>Action / details</th><th>Amount</th><th>Balance after</th><th>Transaction</th></tr></thead><tbody id="account-transactions"></tbody></table>
-          </div>
-        </section>
-        <section class="card freq-card" data-testid="digit-frequency-card">
-          <div class="card-kicker">Digit frequency · last 100 ticks</div>
-          <div class="freq" id="digit-frequency" data-testid="digit-frequency"></div>
-        </section>
-      </div>
-      <details class="card lab-card" id="matches-research">
-        <summary class="lab-summary">Digit Matches research <span class="muted">· historical scenarios only</span></summary>
-        <h2>Digit Matches</h2>
-        <p class="hint">Wins only when the final digit matches the chosen digit. Under independent uniform digits, each digit has a theoretical 10% chance. Historical frequencies do not establish a prediction.</p>
-        <p class="hint" id="matches-verdict" role="status">Loading preserved evidence…</p>
-        <dl class="educational-grid" id="matches-metrics"></dl>
-        <p class="hint">NO TRADE: no tested strategy qualified. This research cannot change your account, choose a broker trade, or start an order. Saved public payouts are scenario assumptions, not current executable quotes.</p>
-        <p class="hint" id="matches-limitations"></p>
-      </details>
-      <details class="card lab-card" id="saved-research">
-        <summary class="lab-summary">Saved research history <span class="muted">· virtual records, separate from Deriv</span></summary>
-        <p class="hint">Previous local research records remain available here. Their results are not provider transactions and never change the balance above.</p>
-        <label class="field-label" for="saved-session-select">Previous research session</label>
-        <select class="select select-sm" id="saved-session-select"></select>
-        <p class="hint" id="saved-research-stats"></p>
-        <div class="table-wrap history-scroll"><table class="table"><thead><tr><th>Time</th><th>Historical contract</th><th>Virtual P/L</th><th>Outcome</th></tr></thead><tbody id="saved-research-rows"></tbody></table></div>
-      </details>
-      <footer class="disclaimer">Genuine Deriv account information above. Real accounts are view-only. Digit Matches research is separate and sends no orders.</footer>
+      <footer class="disclaimer">Practice only. No account orders. Practice results do not change your Deriv balance; Real accounts are view-only.</footer>
     </main>
     <dialog class="dialog" id="connect-dialog" data-testid="deriv-account-modal" aria-labelledby="connect-title">
       <div class="dialog-inner">

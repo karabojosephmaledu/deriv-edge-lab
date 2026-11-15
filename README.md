@@ -1,16 +1,18 @@
 # Deriv Edge Lab
 
-An account-centered dashboard for Deriv Options accounts, with live public market data and separate historical Digit Matches research.
+A simple automatic Digit Matches practice dashboard with genuine Deriv account balances and live public market data.
 
-- Genuine authorized Demo and Real balances, currency and recent transactions; Real accounts are view-only.
-- Original dark-blue styling, public ticks, last ten digits, digit frequency and WIN/LOSS notification sounds.
-- Digit Matches historical research and previous local research records stay separate from account information. No replacement virtual-wallet card.
-- Existing Demo execution and simulation code is retained unchanged for preservation/regression checks. The current account-display page does not load that entry point or start orders.
-- No paid AI services, new dependency or Emergent credits are required.
+- Authorized Demo/Real balance selection and refresh; Real accounts stay view-only.
+- Automatic digit selection, fixed stake, target, loss limit, Start/Pause/Stop and clear practice results.
+- Original dark-blue styling, live prices, last ten digits and WIN/LOSS sounds.
+- No visible growth preset, manual digit picker, research/history panels or virtual-wallet card.
+- No account orders, new dependency, paid AI service or Emergent credits required.
 
-## Current account-centered website
+## Current simple dashboard
 
-The deployed page retains genuine authorized Demo/Real account balances and read-only provider activity. A compact Digit Matches virtual-testing card restores Start/Pause/Stop, Fixed-Stake and Video Growth presets, session limits and separate virtual results. It never starts account orders. The large virtual wallet and other contract-strategy controls remain removed. Original execution/simulation source remains preserved separately and is not activated by this page. See [the account-experience investigation](research/ACCOUNT-EXPERIENCE.md) for the confirmed cause, source-preservation boundary, supported data and limitations.
+The normal page shows authorized Demo/Real balances, market/prices, stake, target, loss limit, Start/Pause/Stop and one set of practice results. Digit selection is automatic. The manual selector, Video Growth preset, research/history panels and extra charts are removed from the main interface; archived code/data remain preserved. Real accounts stay view-only and no account orders are activated.
+
+See [automatic selection rules, safeguards and verification](research/SIMPLE-AUTO-MATCHES.md). This frequency heuristic is not a proven profitable strategy or a guarantee of doubling a small account.
 
 ## Structure
 
