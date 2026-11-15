@@ -1,12 +1,12 @@
 /* ==========================================================================
  * Deriv Edge Lab — app.js  (vanilla JS, no build step)
  *
- * TWO SEPARATE AREAS
- *   Research simulation — real Deriv ticks (public WebSocket) + VIRTUAL money.
- *                         Never places Deriv contracts.
- *   Connected account   — OAuth (PKCE) or API token → account list, real
- *                         balance via OTP WebSocket. VIEW-ONLY: this file
- *                         contains no buy/sell calls (execution disabled).
+ * TWO EXPLICIT MODES
+ *   Research simulation — public Deriv ticks + separate VIRTUAL results.
+ *   Deriv Demo execution — explicit opt-in; backend verifies the Demo account,
+ *     obtains authenticated quotes and places/monitors actual Demo contracts.
+ *     Credentials stay server-side; this browser never sends buy/sell messages.
+ *     Live accounts are blocked independently by the backend.
  *
  * Simulation rules (one open virtual contract at a time, no duplicates):
  *   Differs     — opened on tick T, settled on tick T+1. Win if T+1's last
@@ -40,6 +40,7 @@ const DEFAULT_CONFIG = {
   public_ws_url: "wss://api.derivws.com/trading/v1/options/ws/public",
   api_base: "https://api.derivws.com",
   oauth_ready: false,
+  demo_execution_enabled: false,
   oauth_authorize_url: "https://auth.deriv.com/oauth2/auth",
 };
 
@@ -85,6 +86,15 @@ const state = {
   activeId: null,
   owner: null,
   connecting: false,
+  execution: "simulation",
+  demo: null,
+  csrf: null,
+  demoBusy: false,
+  demoHalted: false,
+  demoRunId: null,
+  accountPoll: null,
+  sessionView: null,
+  snapshotRevision: 0,
   tradeRetryDelay: 1000,
   settings: {
     symbol: "R_100", product: "differs", digit: 5, autoDigit: false, stake: 1, entryFilter: false,
@@ -177,21 +187,35 @@ function ssSet(key, value) {
 
 /* --------------------------------- config -------------------------------- */
 
-async function loadConfig() {
+const CONFIG_RETRY_DELAYS = [5000, 10000, 15000, 20000];
+let configRetryTimer = null;
+
+async function loadConfig(attempt = 0) {
+  let timer;
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 4000);
-    const res = await fetch("/api/deriv/config", { signal: ctrl.signal });
-    clearTimeout(timer);
-    if (!res.ok) return;
+    timer = setTimeout(() => ctrl.abort(), 4000);
+    const res = await fetch("/api/deriv/config", { signal: ctrl.signal, cache: "no-store" });
+    if (!res.ok) throw new Error("config-unavailable");
     const d = await res.json();
+    if (!d || typeof d.oauth_ready !== "boolean") throw new Error("invalid-config");
     if (d.app_id && d.app_id !== "1089") state.cfg.app_id = String(d.app_id);
     if (d.public_ws_url) state.cfg.public_ws_url = d.public_ws_url;
     if (d.api_base) state.cfg.api_base = d.api_base;
     if (d.oauth_authorize_url) state.cfg.oauth_authorize_url = d.oauth_authorize_url;
     state.cfg.oauth_ready = !!d.oauth_ready;
+    state.cfg.demo_execution_enabled = d.demo_execution_enabled === true;
+    clearTimeout(configRetryTimer);
+    configRetryTimer = null;
+    // A Free backend can wake after the user has already opened the connection dialog.
+    $("oauth-block").hidden = !state.cfg.oauth_ready;
   } catch {
-    /* standalone (e.g. CodePen): API-token connect still works */
+    // Retry in the background so a sleeping backend never blocks public market data.
+    if (attempt < CONFIG_RETRY_DELAYS.length) {
+      configRetryTimer = setTimeout(() => loadConfig(attempt + 1), CONFIG_RETRY_DELAYS[attempt]);
+    }
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -600,6 +624,10 @@ function onTick(tick, synthetic = false) {
 
 function simulateTick(price, digit) {
   if (!liveSimulationReady()) return;
+  if (state.execution === "demo") {
+    if (state.session === "running" && !state.demoHalted) void demoSignal();
+    return;
+  }
   if (state.pos) {
     const res = stepContract(state.pos, price, digit);
     if (res) settle(res);
@@ -707,6 +735,12 @@ function checkSessionLimits() {
 }
 
 function interruptSimulation(reason) {
+  if (state.execution === "demo") {
+    state.demoHalted = true;
+    if (state.demo && ["running", "paused"].includes(state.demo.status)) void demoControl("stop");
+    toast(reason + " Demo entries stopped; the existing Deriv contract is still monitored.", "error");
+    return;
+  }
   if (!state.pos && state.session !== "running" && state.session !== "paused") return;
   if (state.pos) {
     const pos = state.pos;
@@ -725,6 +759,7 @@ function interruptSimulation(reason) {
 
 function startSession() {
   unlockAudio();
+  if (state.execution === "demo") return void startDemoSession();
   if (state.session === "running") return;
   if (state.pos && state.session !== "paused") {
     toast("The previous session's open contract must finish before starting a new session.", "info");
@@ -749,12 +784,14 @@ function startSession() {
 }
 
 function pauseSession() {
+  if (state.execution === "demo") return void demoControl("pause");
   if (state.session !== "running") return;
   state.session = "paused"; // an open contract still settles normally
   renderControls();
 }
 
 function stopSession() {
+  if (state.execution === "demo") return void demoControl("stop");
   if (state.session === "idle") return;
   state.session = "done";
   renderControls();
@@ -859,39 +896,6 @@ function errText(err) {
   return err.message || err.code || "unknown error";
 }
 
-function authHeaders() {
-  const c = state.cred;
-  if (!c) return {};
-  const h = { Authorization: "Bearer " + c.token };
-  if (c.kind === "pat") {
-    h["Deriv-App-ID"] = state.cfg.app_id;
-    h["X-Deriv-Token-Kind"] = "pat";
-  }
-  return h;
-}
-
-async function derivRest(method, path) {
-  if (!state.cred) throw new Error("Not connected");
-  const headers = authHeaders();
-  delete headers["X-Deriv-Token-Kind"];
-  if (method !== "GET") headers["Content-Type"] = "application/json";
-  let res;
-  try {
-    res = await fetch(state.cfg.api_base + path, { method, headers, body: method === "GET" ? undefined : "{}" });
-  } catch {
-    throw new Error("Could not reach Deriv's API from this network.");
-  }
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const e = new Error((data && (data.message || (data.errors && data.errors[0] && data.errors[0].message))) || "Deriv returned HTTP " + res.status);
-    e.status = res.status;
-    throw e;
-  }
-  return data;
-}
-
-/* ------------------------------ sign-in flow ----------------------------- */
-
 function b64url(bytes) {
   let s = "";
   for (const b of new Uint8Array(bytes)) s += String.fromCharCode(b);
@@ -913,6 +917,25 @@ async function startOAuth() {
   location.href = state.cfg.oauth_authorize_url + "?" + q.toString();
 }
 
+async function demoApi(path, method = "GET", body) {
+  const headers = {};
+  if (method !== "GET") {
+    headers["Content-Type"] = "application/json";
+    if (state.csrf) headers["X-Deriv-CSRF"] = state.csrf;
+  }
+  const response = await fetch("/api/deriv" + path, {
+    method, headers, credentials: "same-origin", cache: "no-store",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data) {
+    const error = new Error(typeof data?.detail === "string" ? data.detail : "Demo request failed. Reconnect and check the session status.");
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
 async function handleOAuthReturn() {
   if (!location.hash || location.hash.length < 2) return false;
   const params = new URLSearchParams(location.hash.slice(1));
@@ -921,155 +944,220 @@ async function handleOAuthReturn() {
   if (!code && !error) return false;
   history.replaceState(null, "", location.pathname + location.search);
   if (error) {
-    toast("Deriv login cancelled: " + (params.get("error_description") || error), "error");
+    toast("Deriv login cancelled or rejected. Please try again.", "error");
     return true;
   }
   const pkce = ssGet(PKCE_KEY);
   ssSet(PKCE_KEY, null);
   if (!pkce || pkce.state !== params.get("state")) {
-    toast("Login check failed (state mismatch) — please try again.", "error");
+    toast("Login check failed — please sign in again from this browser tab.", "error");
     return true;
   }
   try {
-    const res = await fetch("/api/deriv/token", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, code_verifier: pkce.verifier, redirect_uri: redirectUri() }),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data || !data.access_token) throw new Error((data && data.detail) || "token exchange failed");
-    setCred({ token: data.access_token, kind: "oauth", expiresAt: Date.now() + (Number(data.expires_in) || 3600) * 1000 });
-    await connectAccounts();
+    const data = await demoApi("/token", "POST", { code, code_verifier: pkce.verifier, redirect_uri: redirectUri() });
+    applyDemoSnapshot(data, true);
+    startAccountPolling();
+    closeConnectDialog();
   } catch (err) {
-    toast("Deriv login failed: " + errText(err), "error");
+    showConnectError(errText(err));
+    openConnectDialog();
   }
   return true;
 }
 
-function setCred(cred) {
-  state.cred = cred;
-  ssSet(CRED_KEY, cred);
-}
-
 function loadCred() {
-  const c = ssGet(CRED_KEY);
-  if (c && c.token && (!c.expiresAt || c.expiresAt > Date.now())) state.cred = c;
-  else ssSet(CRED_KEY, null);
+  // Remove credentials left by the old view-only build. Only PKCE state stays client-side.
+  ssSet(CRED_KEY, null);
   const a = ssGet(ACTIVE_KEY);
   if (typeof a === "string") state.activeId = a;
 }
 
-async function connectAccounts() {
-  if (!state.cred || state.connecting) return false;
+async function connectAccounts(silent = false) {
+  if (state.connecting) return false;
   state.connecting = true;
-  setConnectBusy(true);
   try {
-    const data = await derivRest("GET", "/trading/v1/options/accounts");
-    const list = ((data && data.data) || [])
-      .filter((a) => a && a.account_id && a.status !== "inactive")
-      .map((a) => ({ id: String(a.account_id), currency: a.currency || "USD", balance: Number(a.balance) || 0, isVirtual: a.account_type === "demo" }));
-    if (!list.length) throw new Error("No active Options accounts found on this login.");
-    state.accounts = list;
-    derivRest("GET", "/account/v1/nickname")
-      .then((r) => {
-        if (r && r.data && r.data.nickname) {
-          state.owner = String(r.data.nickname);
-          renderAccount();
-        }
-      })
-      .catch(() => {});
-    await openAccountSocket(list.find((a) => a.id === state.activeId) || list.find((a) => a.isVirtual) || list[0]);
-    closeConnectDialog();
+    const data = await demoApi("/session");
+    applyDemoSnapshot(data);
+    // Reload never silently resumes actual order submission.
+    if (data.run?.status === "running") {
+      state.demoHalted = true;
+      applyDemoSnapshot(await demoApi("/demo/control", "POST", { action: "pause" }));
+    }
+    startAccountPolling();
     return true;
   } catch (err) {
-    if (err && (err.status === 401 || err.status === 403)) {
-      clearCred();
-      showConnectError(err.status === 403 ? "That token lacks the Trade scope." : "Deriv rejected the token (expired or invalid). Please connect again.");
-    } else showConnectError(errText(err));
-    openConnectDialog();
-    renderAccount();
+    if (!silent) { showConnectError(errText(err)); openConnectDialog(); }
     return false;
   } finally {
     state.connecting = false;
-    setConnectBusy(false);
+    renderAccount();
   }
 }
 
-/** View-only account socket: balance stream. No orders are ever sent. */
-async function openAccountSocket(acc) {
-  if (state.trade) state.trade.close();
-  state.account = null;
-  state.activeId = acc.id;
-  ssSet(ACTIVE_KEY, acc.id);
-  renderAccount();
-  const otp = await derivRest("POST", "/trading/v1/options/accounts/" + encodeURIComponent(acc.id) + "/otp");
-  const url = otp && otp.data && otp.data.url;
-  if (!url) throw new Error("Deriv did not return a connection URL.");
-  await new Promise((resolve, reject) => {
-    let opened = false;
-    const sock = makeSocket({
-      onOpen: () => {
-        opened = true;
-        state.tradeRetryDelay = 1000;
-        state.account = { ...acc };
-        renderAccount();
-        sock.request({ balance: 1, subscribe: 1 }).catch(() => {});
-        toast("Connected to " + acc.id + " (" + (acc.isVirtual ? "Demo" : "Real") + ")", "success");
-        resolve();
-      },
-      onMessage: (msg) => {
-        if (!msg.error && msg.msg_type === "balance" && msg.balance) onBalance(msg.balance);
-      },
-      onClose: () => {
-        if (!opened) return reject(new Error("Account connection was refused by Deriv."));
+function startAccountPolling() {
+  clearInterval(state.accountPoll);
+  let busy = false;
+  state.accountPoll = setInterval(async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      applyDemoSnapshot(await demoApi("/session"));
+    } catch (err) {
+      state.demoHalted = true;
+      state.account = null; // Do not present a stale balance as a verified live connection.
+      if (err.status === 401) {
+        clearInterval(state.accountPoll);
         state.account = null;
-        renderAccount();
-        if (!state.cred || state.activeId !== acc.id) return;
-        setTimeout(() => {
-          if (state.cred && state.activeId === acc.id && !(state.trade && state.trade.isBusy())) openAccountSocket(acc).catch(() => {});
-        }, state.tradeRetryDelay);
-        state.tradeRetryDelay = Math.min(state.tradeRetryDelay * 2, 30000);
-      },
-    });
-    state.trade = sock;
-    sock.open(url);
-  });
+        state.cred = null;
+        toast("Demo session expired or the backend restarted. Reconnect to recover pending contracts.", "error");
+      }
+      renderAccount(); renderControls();
+    } finally { busy = false; }
+  }, 2000);
 }
 
-function onBalance(b) {
-  if (!state.account) return;
-  const v = Number(b.balance);
-  if (Number.isFinite(v)) state.account.balance = v;
-  if (b.currency) state.account.currency = b.currency;
-  const listed = state.accounts.find((a) => a.id === state.account.id);
-  if (listed) listed.balance = state.account.balance;
-  renderAccount();
+function applyDemoSnapshot(data, reset = false) {
+  if (reset) { state.sessionView = data.session_view; state.snapshotRevision = 0; }
+  if (state.sessionView && data.session_view !== state.sessionView) return;
+  if (data.revision < state.snapshotRevision) return;
+  state.sessionView = data.session_view;
+  state.snapshotRevision = data.revision;
+  state.csrf = data.csrf;
+  state.cred = { kind: "server" };
+  state.accounts = data.accounts || [];
+  state.account = data.connected ? data.account : null;
+  state.owner = data.owner || null;
+  state.activeId = data.account?.id || null;
+  ssSet(ACTIVE_KEY, state.activeId);
+  state.demo = data.run || null;
+  if (state.demo?.pending || ["running", "paused"].includes(state.demo?.status)) {
+    state.execution = "demo";
+    $("execution-mode").value = "demo";
+  }
+  if (state.execution === "demo" && state.demo) {
+    const run = state.demo;
+    if (state.demoRunId !== run.id) {
+      state.stats = freshStats();
+      state.demoRunId = run.id;
+    }
+    state.session = state.demoHalted && run.status === "running" ? "done" : run.status;
+    const rows = run.history || [];
+    let total = 0;
+    const history = [...rows].reverse().map((row, index) => {
+      total = Math.round((total + row.profit) * 100) / 100;
+      return { n: index + 1, time: new Date(row.closed_at * 1000), symbol: row.symbol,
+        label: row.label, detail: "Deriv Demo contract " + row.contract_id + " · actual settlement",
+        stake: row.buy_price, pnl: row.profit, outcome: row.status, win: row.profit > 0, cum: total };
+    });
+    state.history = history.reverse().slice(0, HISTORY_LIMIT);
+    const settled = freshStats();
+    for (const row of [...rows].reverse()) recordSettlement(settled, { pnl: row.profit });
+    state.stats.peak = Math.max(state.stats.peak, settled.peak);
+    state.stats.maxDD = Math.max(state.stats.maxDD, settled.maxDD);
+    Object.assign(state.stats, {
+      trades: rows.length, wins: rows.filter((r) => r.profit > 0).length,
+      losses: rows.filter((r) => r.profit < 0).length, breakEven: rows.filter((r) => r.profit === 0).length,
+      net: run.net, sumWin: rows.reduce((n, r) => n + Math.max(0, r.profit), 0),
+      sumLoss: rows.reduce((n, r) => n + Math.min(0, r.profit), 0),
+    });
+    markDrawdown(state.stats, run.pending?.profit || 0);
+    renderStats(); renderHistory(); renderLastTrade();
+  }
+  renderAccount(); renderExecutionMode(); renderControls();
 }
 
 async function connectWithToken() {
-  const token = $("token-input").value.trim();
-  if (!token) return showConnectError("Paste your API token first.");
-  showConnectError("");
-  setCred({ token, kind: "pat", expiresAt: null });
-  if (await connectAccounts()) $("token-input").value = "";
+  const input = $("token-input");
+  const token = input.value.trim();
+  input.value = "";
+  if (!token) return showConnectError("Enter your token privately in this connection form.");
+  setConnectBusy(true);
+  try {
+    applyDemoSnapshot(await demoApi("/session", "POST", { token }), true);
+    startAccountPolling(); closeConnectDialog();
+  } catch (err) { showConnectError(errText(err)); }
+  finally { setConnectBusy(false); }
 }
 
-function switchAccount(id) {
-  const acc = state.accounts.find((a) => a.id === id);
-  if (!acc || id === state.activeId) return;
-  const prev = state.accounts.find((a) => a.id === state.activeId);
-  openAccountSocket(acc).catch((err) => {
-    toast("Could not switch to " + acc.id + ": " + errText(err), "error");
-    if (prev) openAccountSocket(prev).catch(() => renderAccount());
-  });
+async function switchAccount(id) {
+  if (!id || id === state.activeId) return;
+  try { applyDemoSnapshot(await demoApi("/account", "POST", { account_id: id })); }
+  catch (err) { toast(errText(err), "error"); renderAccount(); }
 }
 
-function clearCred() {
-  state.cred = null;
-  ssSet(CRED_KEY, null);
-  ssSet(ACTIVE_KEY, null);
-  if (state.trade) state.trade.close();
-  Object.assign(state, { trade: null, account: null, accounts: [], activeId: null, owner: null });
+async function clearCred() {
+  const result = await demoApi("/disconnect", "POST", {});
+  clearInterval(state.accountPoll);
+  state.demoHalted = true;
+  state.session = "done";
+  state.cred = null; state.csrf = null; state.account = null; state.accounts = [];
+  state.activeId = null; state.demo = null;
+  state.sessionView = "disconnected"; // Reject an already in-flight pre-disconnect poll.
+  ssSet(CRED_KEY, null); ssSet(ACTIVE_KEY, null);
+  renderAccount(); renderControls();
+  toast(result.pending_contract ? "Disconnected. The existing Demo contract is still monitored; no new orders will start." : "Disconnected from Deriv Demo.", "info");
 }
+
+function changeExecutionMode() {
+  const el = $("execution-mode");
+  if (["running", "paused"].includes(state.session) || state.pos || state.demo?.pending) {
+    el.value = state.execution;
+    return toast("Stop the current session and let its contract finish before changing mode.", "info");
+  }
+  state.execution = el.value;
+  state.session = "idle"; state.stats = freshStats(); state.history = []; state.lastResult = null;
+  if (state.execution === "demo" && state.demo) applyDemoSnapshot({ connected: !!state.account, account: state.account,
+    accounts: state.accounts, owner: state.owner, csrf: state.csrf, run: state.demo, session_view: state.sessionView, revision: state.snapshotRevision });
+  renderExecutionMode(); renderStrategy(); renderStats(); renderHistory(); renderLastTrade(); renderControls();
+}
+
+function renderExecutionMode() {
+  const demo = state.execution === "demo";
+  $("mode-badge").textContent = demo ? "Deriv Demo · actual contracts" : "Research · virtual money";
+  $("account-mode-note").textContent = demo ? "Demo orders enabled · Live accounts blocked" : "Simulation sends no orders · Live accounts blocked";
+  $("trade-type-label").textContent = demo ? "Trade type · Deriv Demo" : "Trade type · virtual";
+  $("session-label").textContent = demo ? "Session · actual Demo results" : "Session · virtual";
+  $("history-label").textContent = demo ? "Deriv Demo contract history" : "Virtual trade history (simulated)";
+  $("mode-disclaimer").textContent = demo ? "Actual Deriv Demo contracts use Demo funds. Live-account execution is blocked." : "Virtual-money simulation on live Deriv data. No orders are placed in simulation mode.";
+  $("execution-note").textContent = demo ? state.demo?.error || (state.cfg.demo_execution_enabled ? "Start Demo trading places actual contracts in your USD Demo account. Settings stay fixed until the session ends." : "Demo execution is disabled on the backend until deployment is approved and configured.") : "Simulation uses separate virtual results and never changes the Deriv balance.";
+}
+
+async function startDemoSession() {
+  if (state.demoBusy) return;
+  if (!state.account?.isVirtual || state.account.currency !== "USD") return toast("Connect an authorised USD Demo account first.", "error");
+  if (!liveSimulationReady()) return toast("Wait for live Deriv market data.", "error");
+  if (state.settings.autoDigit || state.settings.entryFilter) return toast("Experimental comparison filters remain simulation-only. Use manual settings for Demo execution.", "info");
+  state.demoBusy = true; renderControls();
+  try {
+    const s = state.settings;
+    const data = state.demo?.status === "paused" ? await demoApi("/demo/control", "POST", { action: "resume" }) : await demoApi("/demo/start", "POST", {
+      symbol: s.symbol, product: s.product, stake: s.stake, digit: s.digit, growth: s.growth,
+      mult: s.mult, direction: s.dir, target: s.target, max_loss: s.maxLoss, max_trades: s.maxTrades,
+    });
+    state.demoHalted = false;
+    applyDemoSnapshot(data);
+  } catch (err) { state.demoHalted = true; toast(errText(err), "error"); }
+  finally { state.demoBusy = false; renderControls(); }
+}
+
+async function demoSignal() {
+  if (state.demoBusy || state.demoHalted || state.demo?.pending) return;
+  state.demoBusy = true;
+  try { applyDemoSnapshot(await demoApi("/demo/signal", "POST", {})); }
+  catch (err) {
+    state.demoHalted = true;
+    toast(errText(err), "error");
+    await demoControl("stop");
+  } finally { state.demoBusy = false; renderControls(); }
+}
+
+async function demoControl(action) {
+  if (action === "stop") state.demoHalted = true;
+  try { applyDemoSnapshot(await demoApi("/demo/control", "POST", { action })); }
+  catch (err) { state.demoHalted = true; toast(errText(err), "error"); }
+  renderControls();
+}
+
 
 /* -------------------------------- formatting ----------------------------- */
 
@@ -1114,6 +1202,7 @@ function renderAll() {
   renderHistory();
   renderLastTrade();
   renderControls();
+  renderExecutionMode();
 }
 
 function renderAccount() {
@@ -1130,7 +1219,7 @@ function renderAccount() {
   $("currency-flag").hidden = !FLAGS[cur];
   $("balance-value").textContent = money(acc.balance, acc.currency);
   $("balance-currency").textContent = acc.currency;
-  $("account-loginid").textContent = acc.id + " · real Deriv balance";
+  $("account-loginid").textContent = acc.id + " · authorised Deriv Demo balance";
   const badge = $("account-type");
   badge.textContent = acc.isVirtual ? "Demo" : "Real";
   badge.className = "badge " + (acc.isVirtual ? "badge-demo" : "badge-real");
@@ -1209,6 +1298,7 @@ function renderTicket() {
   $("tk-profit").textContent = "+" + money(profit);
   $("tk-loss").textContent = "−" + money(stake);
   $("tk-note").textContent = note;
+  if (state.execution === "demo") $("tk-note").textContent = "Preview estimate; execution uses the authenticated Demo quote. " + note;
 }
 
 function renderDigitExplain() {
@@ -1223,13 +1313,21 @@ function renderDigitExplain() {
 
 function renderControls() {
   const ss = state.session;
-  $("start-btn").disabled = ss === "running" || !liveSimulationReady() || (ss !== "paused" && !!state.pos);
-  $("start-btn").textContent = ss === "paused" ? "Resume" : ss === "done" ? "New session" : "Start";
+  const demo = state.execution === "demo";
+  const pending = demo ? !!state.demo?.pending : !!state.pos;
+  const active = ["running", "paused"].includes(ss) || pending;
+  $("start-btn").disabled = ss === "running" || !liveSimulationReady() || (ss !== "paused" && pending) ||
+    (demo && (!state.cfg.demo_execution_enabled || state.demoBusy || !state.account?.isVirtual || state.account.currency !== "USD"));
+  $("start-btn").textContent = demo ? ss === "paused" ? "Resume Demo" : "Start Demo trading" : ss === "paused" ? "Resume" : ss === "done" ? "New session" : "Start";
   $("pause-btn").disabled = ss !== "running";
-  $("stop-btn").disabled = ss === "idle" || ss === "done";
+  $("stop-btn").disabled = demo ? !["running", "paused"].includes(state.demo?.status) : ss === "idle" || ss === "done";
   $("running-indicator").hidden = ss !== "running" && ss !== "paused";
-  $("running-text").textContent = ss === "paused" ? "Paused" : "Running · virtual";
-  $("symbol-select").disabled = !!state.pos;
+  $("running-text").textContent = ss === "paused" ? "Paused" : demo ? "Running · Deriv Demo contracts" : "Running · virtual";
+  $("symbol-select").disabled = demo ? active : !!state.pos;
+  $("execution-mode").disabled = active;
+  $("account-select").disabled = demo && active;
+  for (const id of ["stake-input", "target-input", "maxloss-input"]) $(id).disabled = demo && active;
+  document.querySelectorAll("[data-product], [data-dir], [data-growth], [data-mult], .digit").forEach((el) => { el.disabled = demo && active; });
 }
 
 function renderQuote(entry) {
@@ -1285,6 +1383,17 @@ function renderDigitPayouts() {
 
 function renderLastTrade() {
   const el = $("last-trade");
+  if (state.execution === "demo") {
+    const p = state.demo?.pending;
+    el.className = "last-trade" + (p ? " open" : "");
+    if (p) el.textContent = (p.contract_id ? "OPEN · Deriv Demo contract " + p.contract_id : "SUBMITTING / UNRESOLVED · Deriv Demo") +
+      " · " + p.label + " · stake " + money(p.stake) + (p.profit == null ? " · awaiting Deriv result" : " · current P/L " + fmtSigned(p.profit));
+    else {
+      const last = state.history[0];
+      el.textContent = last ? last.detail + " · " + last.outcome.toUpperCase() + " " + fmtSigned(last.pnl) : state.demo?.error || "No Demo contract yet. Start Demo trading sends actual orders.";
+    }
+    return;
+  }
   if (state.pos) {
     const p = state.pos;
     const pnl = openPnl(p);
@@ -1425,6 +1534,9 @@ function toast(message, kind) {
 /* --------------------------------- events -------------------------------- */
 
 function changeSetting(patch, requote) {
+  if (state.execution === "demo" && (["running", "paused"].includes(state.session) || state.demo?.pending)) {
+    return toast("Demo session settings stay fixed. Stop and let its contract settle before changing them.", "info");
+  }
   if (patch.symbol && patch.symbol !== state.settings.symbol && state.pos) {
     $("symbol-select").value = state.settings.symbol;
     toast("Wait for the open virtual contract to finish before changing markets.", "info");
@@ -1475,6 +1587,7 @@ function bindEvents() {
   on("pause-btn", "click", pauseSession);
   on("stop-btn", "click", stopSession);
   on("lab-run-btn", "click", runComparison);
+  on("execution-mode", "change", changeExecutionMode);
 
   on("connect-button", "click", openConnectDialog);
   on("connect-button-nav", "click", () => {
@@ -1488,10 +1601,8 @@ function bindEvents() {
   });
   on("connect-cancel-button", "click", closeConnectDialog);
   on("connect-dialog", "click", (e) => e.target === $("connect-dialog") && closeConnectDialog());
-  on("disconnect-button", "click", () => {
-    clearCred();
-    renderAccount();
-    toast("Disconnected — tokens cleared from this browser.", "info");
+  on("disconnect-button", "click", async () => {
+    try { await clearCred(); } catch (err) { toast(errText(err), "error"); }
   });
   on("account-select", "change", (e) => switchAccount(e.target.value));
 
@@ -1512,7 +1623,7 @@ async function init() {
   await loadConfig();
   connectPublic();
   const handled = await handleOAuthReturn();
-  if (!handled && state.cred) connectAccounts();
+  if (!handled) connectAccounts(true);
 }
 
 init();

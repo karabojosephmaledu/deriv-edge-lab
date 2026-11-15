@@ -1,6 +1,8 @@
 import asyncio
 from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, APIRouter
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
@@ -20,6 +22,7 @@ from lib.db import client, db, ensure_indexes
 
 # Resource routers (each exports its own APIRouter, mounted on api_router below)
 from routers.deriv import router as deriv_router
+from routers import deriv as deriv_module
 
 
 # Startup runs before the yield, shutdown after it. Add your own setup/teardown here.
@@ -30,11 +33,32 @@ async def lifespan(app: FastAPI):
     app.state.index_task.cancel()  # stop a build still running before its client closes
     with suppress(asyncio.CancelledError):
         await app.state.index_task
+    if deriv_module._broker is not None:
+        await deriv_module._broker.shutdown()
     client.close()
 
 
 # Create the main app without a prefix
 app = FastAPI(lifespan=lifespan)
+
+
+@app.middleware("http")
+async def private_deriv_responses(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/deriv/"):
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Pragma"] = "no-cache"
+        vary = {v.strip() for v in response.headers.get("Vary", "").split(",") if v.strip()}
+        response.headers["Vary"] = ", ".join(sorted(vary | {"Cookie", "Origin"}))
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request, exc):
+    # Never echo token/code/verifier request inputs in validation responses.
+    return JSONResponse(status_code=422, content={"detail": [
+        {"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]} for e in exc.errors()
+    ]})
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")

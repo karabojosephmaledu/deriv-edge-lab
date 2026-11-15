@@ -3,11 +3,16 @@ services:
   - type: web
     name: deriv-edge-lab-api
     runtime: python
+    plan: free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /api/deriv/config
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: DERIV_DEMO_TRADING_ENABLED
+        value: "false"
       - key: MONGO_URL
         sync: false
       - key: DB_NAME
@@ -27,4 +32,4 @@ services:
     routes:
       - type: rewrite
         source: /api/*
-        destination: https://deriv-edge-lab-api.onrender.com/api/*
+        destination: https://deriv-edge-lab-2oux.onrender.com/api/*
