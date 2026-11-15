@@ -48,7 +48,7 @@ before(async () => {
     const files = { "/": "index.html", "/app.js": "public/app.js", "/research.js": "public/research.js", "/research-evidence.json": "public/research-evidence.json", "/styles.css": "public/styles.css", "/favicon.svg": "public/favicon.svg" };
     if (!files[req.url]) { res.writeHead(404).end(); return; }
     res.setHeader("Content-Type", req.url.endsWith(".json") ? "application/json" : req.url.endsWith(".js") ? "application/javascript" : req.url.endsWith(".css") ? "text/css" : "text/html");
-    res.end(readFileSync(resolve(root, files[req.url])));
+    res.end(readFileSync(req.url === "/" ? resolve(__dirname, "fixtures/legacy-dashboard.html") : resolve(root, files[req.url])));
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   origin = `http://127.0.0.1:${server.address().port}`;
