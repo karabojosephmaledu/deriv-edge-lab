@@ -196,8 +196,8 @@ function renderSoundToggle() {
 function renderAccount() {
   const data = state.view, acc = data?.selected_account;
   $("account-empty").hidden = !!acc; $("account-live").hidden = !acc;
-  const status = state.checking ? "Checking account authorization…" : state.auth === "authorised" ? "Account authorized · balances and activity are read-only" : state.auth === "unavailable" ? "Account information unavailable — retry status" : "Connect with Deriv to view genuine account information";
-  $("account-auth-status").textContent = status + (state.error ? ". " + state.error : "");
+  const status = state.checking ? "Checking account authorization…" : state.auth === "authorised" ? "Account authorized · balances and activity are read-only" : state.auth === "unavailable" ? "Account information unavailable — retry status" : "Not connected";
+  $("account-auth-status").textContent = status + (state.error && state.auth !== "unauthorised" ? ". " + state.error : "");
   $("connect-status").textContent = status;
   $("connect-button-nav").textContent = acc ? acc.id : state.checking ? "Checking…" : "Connect account";
   $("account-refresh").disabled = state.checking;
@@ -219,6 +219,7 @@ function renderAccount() {
 }
 function cell(text) { const el = document.createElement("td"); el.textContent = text; return el; }
 function renderActivity() {
+  if (!$("account-transactions")) return;
   const data = state.view, contracts = data?.contracts || [], body = $("account-transactions"); body.textContent = "";
   const known = !!data?.contracts_updated_at;
   const wins = contracts.filter(r => r.profit > 0).length, losses = contracts.filter(r => r.profit < 0).length;
@@ -240,7 +241,7 @@ function renderActivity() {
 }
 let flashTimer;
 function notifyContracts(data, switched) {
-  if (!data.contracts_updated_at) return;
+  if (!$("account-transactions") || !data.contracts_updated_at) return;
   const key = data.session_view + ":" + data.selected_account.id;
   let seen = state.notices.get(key);
   if (!seen || switched) { state.notices.set(key, new Set(data.contracts.map(r => r.id))); return; }
@@ -347,6 +348,7 @@ function tick(t) {
   window.matchesLab?.feed({symbol,price,pip,epoch});
 }
 function renderFrequency() {
+  if (!$("digit-frequency")) return;
   const counts=Array.from({length:10},(_,d)=>state.digits.filter(n=>n===d).length), max=Math.max(1,...counts), wrap=$("digit-frequency"); wrap.textContent="";
   counts.forEach((n,d)=>{const col=document.createElement("div"); col.className="freq-col"; col.title=d+": "+n+" of "+state.digits.length+" ticks";
     col.innerHTML='<div class="freq-track"><div class="freq-bar" style="height:'+(100*n/max)+'%"></div></div><span class="freq-label">'+d+'</span>'; wrap.append(col);});
@@ -371,6 +373,7 @@ function connectPublic() {
   state.pub.open(DEFAULT_CONFIG.public_ws_url);
 }
 async function loadMatches() {
+  if (!$("matches-research")) return;
   try {
     const r=await fetch("/research-evidence.json",{cache:"no-cache"}); if(!r.ok)throw new Error();
     const c=(await r.json()).categories.find(c=>c.id==="matches"); if(!c)throw new Error();
@@ -384,6 +387,7 @@ async function loadMatches() {
   }catch{$("matches-verdict").textContent="Historical evidence unavailable. NO TRADE; no result was substituted.";}
 }
 function loadSavedResearch() {
+  if (!$("saved-research")) return;
   try {const old=JSON.parse(localStorage.getItem("del.virtual.session.v1")||"null"); state.saved=[old?.current,...(Array.isArray(old?.archives)?old.archives:[])].filter(s=>Array.isArray(s?.history)&&s.history.length).slice(0,21);}catch{}
   const selector=$("saved-session-select");
   state.saved.forEach((s,i)=>selector.add(new Option("Saved research session "+(i+1)+" · "+s.history.length+" historical records",String(i))));
@@ -414,7 +418,7 @@ async function init() {
   $("account-select").addEventListener("change",e=>{state.selected=e.target.value;state.view=null;renderActivity();void refreshAccount(state.selected);});
   $("account-refresh").addEventListener("click",()=>refreshAccount());
   $("disconnect-button").addEventListener("click",async()=>{try{state.generation++;state.controller?.abort();state.checking=true;renderAccount();await api("/disconnect","POST",{});state.generation++;state.controller?.abort();state.view=null;state.selected=null;state.csrf=null;state.auth="unauthorised";state.error=null;state.checking=false;ssSet(ACTIVE_KEY,null);renderAccount();renderActivity();}catch(e){state.checking=false;state.error=e.message;state.auth="unavailable";renderAccount();toast(e.message,"error");}});
-  $("saved-session-select").addEventListener("change",renderSavedResearch);
+  $("saved-session-select")?.addEventListener("change",renderSavedResearch);
   renderSoundToggle();renderAccount();renderActivity();renderFrequency();loadSavedResearch();void loadMatches();void loadConfig();connectPublic();
   if(!await handleOAuthReturn())void refreshAccount();
   setInterval(()=>{if(!document.hidden&&!state.checking&&state.auth!=="unauthorised")void refreshAccount();},8000);

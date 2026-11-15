@@ -1,87 +1,124 @@
-/* Small virtual-only controller. Account displays, authentication and execution are independent. */
+/* Simple automatic practice controller. Never submits account orders. */
 (function () {
   'use strict';
-  const M=MatchesSimulation, KEY='del.matches.sessions.v1';
-  let lastQuoteLabel=null, uiError=null, preview=false, engine=null, quote=null, quoting=false, generation=0, archives=[], quoteLabel='Payout requires a current public Deriv Matches quote. No substitute payout is used.';
+  const M=MatchesSimulation, KEY='del.matches.auto.v1';
+  let engine=null, quote=null, quoting=false, generation=0, uiError=null, lastPrice=null;
+  let observations=new Map(), precision=null, historyGeneration=0, historyPending=false, historyAttempted=false;
   const active=()=>engine&&(['running','paused','stopping'].includes(engine.status)||!!engine.pending);
   const ready=()=>state.feed==='live'&&state.pub?.isOpen()&&state.lastEpoch>0&&Date.now()-state.lastTickAt<5000;
-  function config(){return{preset:$('matches-preset').value,digit:Number($('matches-digit').value),stake:$('matches-stake').value,target:$('matches-target').value,loss:$('matches-loss').value,symbol:$('symbol-select').value};}
-  function cancelQuote(){generation++;quote=null;if(quoting)quoteLabel=lastQuoteLabel?lastQuoteLabel.replace("Public quote", "Last public quote (reference)"):"Quote request cancelled. Start or Resume for a fresh quote.";quoting=false;}
-  function save(){if(!engine)return;try{localStorage.setItem(KEY,JSON.stringify({version:1,current:engine.snapshot(),archives:archives.slice(0,20)}));}catch{$('matches-status').textContent+=' Browser storage unavailable; refresh may lose this virtual session.';}}
+  const interval=()=>$('symbol-select').value.startsWith('1HZ')?1:2;
+  const rows=()=>[...observations.values()].sort((a,b)=>a.epoch-b.epoch);
+  const signal=()=>M.signal(rows(),state.lastEpoch,interval());
+  function config(){return{preset:'fixed',auto:true,digit:0,stake:$('matches-stake').value,target:$('matches-target').value,loss:$('matches-loss').value,symbol:$('symbol-select').value};}
+  function cancelQuote(){generation++;quote=null;quoting=false;}
+  function save(){if(engine)try{localStorage.setItem(KEY,JSON.stringify({version:1,current:engine.snapshot()}));}catch{uiError='Browser storage is unavailable; this practice session may not survive refresh.';}}
+  function shortReason(){
+    if(!engine)return ready()?'Ready. Press Start.':'Waiting for live prices.';
+    if(engine.status==='paused')return 'Paused.';
+    if(engine.status==='stopping')return 'Stopping — waiting for the open result.';
+    if(engine.status==='running'){
+      if(engine.pending)return 'Running — waiting for the next tick.';
+      if(quoting)return 'Running — checking the price.';
+      if(!signal())return observations.size<200?'Preparing automatic selection ('+Math.min(observations.size,200)+'/200).':'Waiting for a clear digit.';
+      return 'Running — digit selected automatically.';
+    }
+    if(engine.reason.includes('profit target'))return 'Target reached.';
+    if(engine.reason.toLowerCase().includes('loss limit'))return 'Stopped — the loss limit prevents another entry.';
+    if(engine.unknown)return 'Stopped — price data was interrupted; a result is unknown.';
+    return engine.reason.startsWith('Price unavailable')?'Stopped — no current price. Press Start to retry.':'Stopped.';
+  }
   function render(){
-    const e=engine, running=e?.status==='running', locked=active(), growth=(e&&!preview?e.cfg.preset:$('matches-preset').value)==='growth';
-    for(const id of ['matches-preset','matches-digit','matches-target','matches-loss'])$(id).disabled=!!locked;
-    $('matches-stake').disabled=!!locked||growth;
-    $('symbol-select').disabled=!!locked;
-    $('matches-start').disabled=!!(running||e?.status==='stopping'||e?.pending&&e.status!=='paused'||!ready());
+    const e=engine,locked=!!active();
+    for(const id of ['matches-stake','matches-target','matches-loss'])$(id).disabled=locked;
+    $('symbol-select').disabled=locked;
+    $('matches-start').disabled=!!(e?.status==='running'||e?.status==='stopping'||e?.pending&&e.status!=='paused'||!ready());
     $('matches-start').textContent=e?.status==='paused'?'Resume':e?.status==='done'?'New session':'Start';
-    $('matches-pause').disabled=!running; $('matches-stop').disabled=!locked;
-    $('matches-status').textContent=uiError||(e?e.reason:ready()?'Ready · virtual testing only':'Waiting for verified live Deriv ticks.');
-    const st=e&&!preview?e.stage():{stake:growth?1:Number($('matches-stake').value),index:0,level:growth?47:null,to:100};
-    $('matches-stage').textContent=growth?'Stage '+(st.index+1)+'/4 · virtual experiment level '+money(st.level,'USD')+' → '+money(st.to,'USD')+' · virtual stake '+money(st.stake,'USD'):'Fixed stake · '+money(st.stake,'USD')+' per virtual entry';
-    $('matches-preset-note').textContent=growth?'Video example: $47–$100 at $1; $100–$200 at $2; $200–$500 at $5; $500–$1,000 at $10. Starts at a hypothetical $47. Stakes step down again if the virtual level falls. These milestones are not promised returns.':'Same selected digit and stake throughout the session. No Martingale or loss-based stake increases.';
-    $('matches-quote').textContent=quoteLabel;
-    $('matches-wins').textContent=e?.wins||0; $('matches-losses').textContent=e?.losses||0;
+    $('matches-pause').disabled=e?.status!=='running';$('matches-stop').disabled=!locked;
+    $('matches-status').textContent=uiError||shortReason();
+    const digit=e?.pending?.digit??quote?.digit??(e?.status==='running'?signal()?.digit:null);
+    $('matches-auto-digit').textContent=digit==null?'Digit selection: automatic':'Automatic digit: '+digit;
+    $('matches-quote').textContent=lastPrice?'Practice return if matched: '+signed((lastPrice.gross-lastPrice.ask)/100,'USD')+' · if missed: −'+money(lastPrice.ask/100,'USD'):'A current Deriv price is required before each entry.';
+    $('matches-wins').textContent=e?.wins||0;$('matches-losses').textContent=e?.losses||0;
     $('matches-rate').textContent=e?.trades?(100*e.wins/e.trades).toFixed(1)+'%':'—';
-    $('matches-pnl').textContent=e?signed(e.net/100,'USD'):money(0,'USD');
-    $('matches-pnl').className='tile-value '+(e?.net>0?'win':e?.net<0?'loss':'');
-    $('matches-count').textContent=(e?.trades||0)+' settled virtual outcomes'+(e?.unknown?' · '+e.unknown+' unresolved (P/L incomplete)':'')+(e?.pending?' · one open virtual entry; waiting for the next live tick':'')+'.';
-    const body=$('matches-history');body.textContent='';
-    for(const row of e?.history||[]){const tr=document.createElement('tr');tr.append(cell(row.n+' · '+new Date(row.time).toLocaleTimeString()),cell('Match '+row.digit+' → '+(row.exitDigit??'?')+' · '+row.outcome),cell(money(row.ask/100,'USD')),cell(row.profit==null?'Unknown':signed(row.profit/100,'USD')));body.append(tr);}
+    $('matches-pnl').textContent=e?signed(e.net/100,'USD'):money(0,'USD');$('matches-pnl').className='tile-value '+(e?.net>0?'win':e?.net<0?'loss':'');
+    const last=e?.history[0];
+    $('matches-count').textContent=(e?.trades||0)+' completed practice entries'+(e?.unknown?' · '+e.unknown+' unknown (P/L incomplete)':'')+(last?' · Last result: '+last.outcome+(last.profit==null?'':' ('+signed(last.profit/100,'USD')+')'):'')+'.';
+  }
+  function observe(t){
+    const digit=Number(t.price.toFixed(t.pip).slice(-1));
+    if(precision!==null&&precision!==t.pip){cancelQuote();observations.clear();historyGeneration++;historyPending=false;historyAttempted=false;}
+    precision=t.pip;observations.set(t.epoch,{epoch:t.epoch,digit});
+    if(observations.size>500)observations=new Map(rows().slice(-400).map(r=>[r.epoch,r]));
+  }
+  async function ensureHistory(){
+    if(historyAttempted||historyPending||!ready()||precision===null)return;
+    historyAttempted=true;historyPending=true;
+    const gen=historyGeneration,symbol=$('symbol-select').value,pip=precision;
+    try{
+      const response=await state.pub.request({ticks_history:symbol,count:200,end:'latest',style:'ticks',adjust_start_time:1},10000);
+      if(gen!==historyGeneration||symbol!==$('symbol-select').value)return;
+      const prices=response.history?.prices,times=response.history?.times;
+      if(!Array.isArray(prices)||!Array.isArray(times)||prices.length!==times.length||prices.length!==200||!['number','string'].includes(typeof response.pip_size)||response.pip_size===''||Number(response.pip_size)!==pip||response.echo_req&&response.echo_req.ticks_history!==symbol)throw Error('Invalid public history');
+      const imported=[];
+      for(let i=0;i<prices.length;i++){
+        if(![prices[i],times[i]].every(v=>typeof v==='number'||typeof v==='string'&&v.trim()!==''))throw Error('Invalid public history');
+        const price=Number(prices[i]),epoch=Number(times[i]);
+        if(!Number.isFinite(price)||price<=0||!Number.isSafeInteger(epoch)||epoch<=0||i>0&&epoch-Number(times[i-1])!==interval())throw Error('Invalid public history');
+        const digit=Number(price.toFixed(pip).slice(-1));
+        if(observations.has(epoch)&&observations.get(epoch).digit!==digit)throw Error('Conflicting public observations');
+        imported.push({epoch,digit});
+      }
+      for(const row of imported)if(!observations.has(row.epoch))observations.set(row.epoch,row);
+    }catch{/* Build from observed live ticks if the public history is unavailable. No synthetic data. */}
+    finally{if(gen===historyGeneration){historyPending=false;render();if(engine?.status==='running')void fetchQuote();}}
   }
   async function fetchQuote(){
     if(!engine||engine.status!=='running'||engine.pending||quoting||!ready())return;
-    const e=engine, st=e.stage().stake, gen=generation;quoting=true;
-    quoteLabel='Requesting a public Digit Matches quote…';render();
+    const chosen=signal();if(!chosen){void ensureHistory();return;}
+    const e=engine,gen=generation,stake=e.cfg.stake;quoting=true;render();
     try{
-      const response=await state.pub.request({proposal:1,amount:st,basis:'stake',contract_type:'DIGITMATCH',currency:'USD',duration:1,duration_unit:'t',underlying_symbol:e.cfg.symbol,barrier:String(e.cfg.digit)},10000);
-      if(gen!==generation||engine!==e||e.status!=='running'||e.stage().stake!==st)return;
-      quote=M.quote(response,st,e.cfg.symbol,e.cfg.digit,Date.now());
-      const profit=(quote.gross-quote.ask)/100;
-      quoteLabel='Public quote · stake '+money(quote.ask/100,'USD')+' · gross return if matched '+money(quote.gross/100,'USD')+' · profit if matched '+signed(profit,'USD')+' · loss if not matched −'+money(st,'USD')+' · break-even '+(100*quote.ask/quote.gross).toFixed(2)+'% wins.';lastQuoteLabel=quoteLabel;
-    }catch(error){if(gen===generation&&engine===e){e.interrupt('Quote unavailable or invalid · no new virtual entry. Press New session to retry.');quoteLabel=error?.message||'Deriv did not provide a valid public Matches payout.';quote=null;save();}}
+      const response=await state.pub.request({proposal:1,amount:stake,basis:'stake',contract_type:'DIGITMATCH',currency:'USD',duration:1,duration_unit:'t',underlying_symbol:e.cfg.symbol,barrier:String(chosen.digit)},10000);
+      if(gen!==generation||engine!==e||e.status!=='running')return;
+      quote={...M.quote(response,stake,e.cfg.symbol,chosen.digit,Date.now()),signalEpoch:chosen.epoch};lastPrice=quote;
+    }catch{if(gen===generation&&engine===e){engine.interrupt('Price unavailable');quote=null;save();}}
     finally{if(gen===generation){quoting=false;render();}}
   }
   function feed(t){
-    if(!engine)return;
+    observe(t);void ensureHistory();
+    if(!engine){render();return;}
     const event=engine.feed(t,quote);
     if(event?.type==='opened'){quote=null;save();}
     if(event?.type==='settled'){
-      const row=event.row,win=row.profit>0,el=$('result-flash');
-      el.className='result-flash '+(win?'win':'loss');el.textContent=(win?'WIN ':'LOSS ')+signed(row.profit/100,'USD')+' · virtual Digit Matches';el.hidden=false;
+      const row=event.row,win=row.profit>0,el=$('result-flash');el.className='result-flash '+(win?'win':'loss');el.textContent=(win?'WIN ':'LOSS ')+signed(row.profit/100,'USD')+' · practice';el.hidden=false;
       $('result-announcer').textContent=el.textContent;clearTimeout(flashTimer);flashTimer=setTimeout(()=>{el.hidden=true;},1200);playResultSound(win);quote=null;save();
     }
     if(event?.type==='interrupted'){cancelQuote();save();}
-    render();
-    if(engine.status==='running'&&!engine.pending&&(!quote||Date.now()-quote.received>10000))void fetchQuote();
+    render();if(engine.status==='running'&&!engine.pending&&(!quote||Date.now()-quote.received>10000))void fetchQuote();
   }
-  function interrupt(reason){if(!engine||!active()||engine.status==='paused'&&!engine.pending)return;cancelQuote();engine.interrupt(reason);render();save();}
+  function interrupt(reason){
+    historyGeneration++;historyPending=false;historyAttempted=false;observations.clear();precision=null;
+    cancelQuote();
+    if(engine&&active()&&!(engine.status==='paused'&&!engine.pending)){engine.interrupt(reason);save();}
+    render();
+  }
   function start(){
     unlockAudio();if(!ready())return;uiError=null;
     try{
-      if(!engine||engine.status==='done'||engine.status==='idle'){
-        const next=new M.Engine(config()); // Validate before archiving the old session.
-        if(engine?.history.length)archives=[engine.snapshot(),...archives].slice(0,20);
-        engine=next;engine.lastEpoch=state.lastEpoch;preview=false;
-      }
-      engine.start();cancelQuote();render();save();void fetchQuote();
+      if(!engine||engine.status==='done'||engine.status==='idle'){engine=new M.Engine(config());engine.lastEpoch=state.lastEpoch;lastPrice=null;}
+      engine.start();cancelQuote();render();save();
+      if(!signal()&&!historyPending)historyAttempted=false;
+      void ensureHistory();void fetchQuote();
     }catch(error){uiError=error.message;render();}
   }
-  function load(){
-    try{
-      const data=JSON.parse(localStorage.getItem(KEY)||'null');
-      if(data?.version===1){engine=M.Engine.restore(data.current);archives=(Array.isArray(data.archives)?data.archives:[]).slice(0,20).filter(s=>{try{M.Engine.restore(s);return true;}catch{return false;}});}
-    }catch{engine=null;}
-    if(engine){const changed=$('symbol-select').value!==engine.cfg.symbol;$('symbol-select').value=engine.cfg.symbol;if(changed&&state.pub?.isOpen())void subscribeMarket();$('matches-preset').value=engine.cfg.preset;$('matches-digit').value=engine.cfg.digit;$('matches-stake').value=engine.cfg.stake;$('matches-target').value=engine.cfg.target??'';$('matches-loss').value=engine.cfg.loss??'';save();}
-    for(const s of archives){state.saved.push({stats:{wins:s.wins,losses:s.losses,net:s.net/100,maxDD:s.maxDD/100},history:s.history.map(r=>({time:new Date(r.time).toISOString(),label:'Digit Matches · '+s.cfg.preset,pnl:r.profit==null?null:r.profit/100,outcome:r.outcome}))});const i=state.saved.length-1;$('saved-session-select').add(new Option('Matches archive · '+(s.wins+s.losses)+' virtual outcomes',String(i)));}
-    if(state.saved.length)$('saved-session-select').disabled=false;
-  }
-  for(let d=0;d<10;d++)$('matches-digit').add(new Option(String(d),String(d)));$('matches-digit').value='7';
-  for(const id of ['matches-preset','matches-digit','matches-stake','matches-target','matches-loss'])$(id).addEventListener('change',()=>{if(active())return;uiError=null;cancelQuote();preview=true;quoteLabel='Payout requires a current public Deriv Matches quote. No substitute payout is used.';render();});
+  try{
+    const data=JSON.parse(localStorage.getItem(KEY)||'null');
+    if(data?.version===1&&data.current?.cfg.auto===true){engine=M.Engine.restore(data.current);const changed=$('symbol-select').value!==engine.cfg.symbol;$('symbol-select').value=engine.cfg.symbol;if(changed&&state.pub?.isOpen())void subscribeMarket();$('matches-stake').value=engine.cfg.stake;$('matches-target').value=engine.cfg.target??'';$('matches-loss').value=engine.cfg.loss??'';save();}
+  }catch{engine=null;}
+  for(const id of ['matches-stake','matches-target','matches-loss'])$(id).addEventListener('change',()=>{if(active())return;uiError=null;cancelQuote();lastPrice=null;render();});
   $('matches-start').addEventListener('click',start);
-  $('matches-pause').addEventListener('click',()=>{if(!engine)return;engine.pause();cancelQuote();render();save();});
-  $('matches-stop').addEventListener('click',()=>{if(!engine)return;engine.stop();cancelQuote();render();save();});
+  $('matches-pause').addEventListener('click',()=>{if(engine){engine.pause();cancelQuote();save();render();}});
+  $('matches-stop').addEventListener('click',()=>{if(engine){engine.stop();cancelQuote();save();render();}});
   window.matchesLab={feed,interrupt,render,get engine(){return engine;},get quote(){return quote;}};
-  load();render();
-  setInterval(()=>{if(active()&&state.lastTickAt&&Date.now()-state.lastTickAt>10000)interrupt("No fresh live ticks · open virtual result unresolved; session stopped");else render();},1000);
+  render();
+  setInterval(()=>{if(active()&&state.lastTickAt&&Date.now()-state.lastTickAt>10000)interrupt('No fresh live ticks · open result unresolved');else render();},1000);
 })();

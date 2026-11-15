@@ -19,9 +19,22 @@
     if (q && (q.contract_type !== 'DIGITMATCH' || q.underlying_symbol !== symbol || String(q.barrier) !== String(digit) || q.duration !== 1 || q.duration_unit !== 't' || q.currency !== 'USD' || cents(q.amount) !== ask)) throw Error('Quote does not match the requested contract');
     return {ask,gross,symbol,digit,received:now};
   }
+  // A past-frequency heuristic, not an asserted prediction or profitable edge.
+  function signal(observations, cutoff, interval=2) {
+    if (!Array.isArray(observations) || !Number.isSafeInteger(cutoff)) return null;
+    const rows=observations.filter(r=>r&&r.epoch<=cutoff).slice().sort((a,b)=>a.epoch-b.epoch).slice(-200);
+    if (rows.length<200 || rows.some((r,i)=>!Number.isInteger(r.digit)||r.digit<0||r.digit>9||!Number.isSafeInteger(r.epoch)||i>0&&r.epoch-rows[i-1].epoch!==interval)) return null;
+    let common=Array.from({length:10},(_,d)=>d);
+    for(const size of [50,150,200]) {
+      const counts=new Array(10).fill(0);for(const row of rows.slice(-size))counts[row.digit]++;
+      const high=Math.max(...counts);common=common.filter(d=>counts[d]===high);
+    }
+    return common.length===1?{digit:common[0],epoch:rows.at(-1).epoch}:null;
+  }
   class Engine {
     constructor(cfg) {
       if (!cfg || !['fixed','growth'].includes(cfg.preset) || !Number.isInteger(cfg.digit) || cfg.digit<0 || cfg.digit>9 || !/^(R_(10|25|50|75|100)|1HZ(10|25|50|75|100)V)$/.test(cfg.symbol)) throw Error('Invalid simulation settings');
+      if (cfg.auto!=null && typeof cfg.auto!=='boolean') throw Error('Invalid automatic mode');
       const stake = cents(cfg.stake);
       if (stake < 35 || stake > 500000) throw Error('Fixed stake must be $0.35–$5,000');
       const limit = v => v == null || v === '' ? null : cents(v);
@@ -79,8 +92,8 @@
       const stake=cents(this.stage().stake);
       if (this.cfg.loss!=null && this.net-stake < -cents(this.cfg.loss)) {this.status='done';this.reason='Stopped: another full-stake loss would exceed the loss limit';return null;}
       if (this.cfg.preset==='growth' && 4700+this.net<stake) {this.status='done';this.reason='Video Growth experiment cannot fund another virtual stake';return null;}
-      if (!q || !Number.isSafeInteger(q.ask) || !Number.isSafeInteger(q.gross) || q.gross<=q.ask || !Number.isFinite(q.received) || q.ask!==stake || q.symbol!==this.cfg.symbol || q.digit!==this.cfg.digit || now-q.received>10000 || now<q.received) return null;
-      this.pending={ask:q.ask,gross:q.gross,digit:this.cfg.digit,entryEpoch:epoch,pip,stage:this.stage().index,symbol:this.cfg.symbol};
+      if (!q || !Number.isSafeInteger(q.ask) || !Number.isSafeInteger(q.gross) || q.gross<=q.ask || !Number.isFinite(q.received) || q.ask!==stake || q.symbol!==this.cfg.symbol || (!this.cfg.auto&&q.digit!==this.cfg.digit) || (this.cfg.auto&&(!Number.isInteger(q.digit)||q.digit<0||q.digit>9||!Number.isSafeInteger(q.signalEpoch)||q.signalEpoch>=epoch)) || now-q.received>10000 || now<q.received) return null;
+      this.pending={ask:q.ask,gross:q.gross,digit:this.cfg.auto?q.digit:this.cfg.digit,signalEpoch:q.signalEpoch??null,entryEpoch:epoch,pip,stage:this.stage().index,symbol:this.cfg.symbol};
       return {type:'opened'};
     }
     snapshot() {return JSON.parse(JSON.stringify(this));}
@@ -91,7 +104,7 @@
       for (const row of s.history) if(!Number.isInteger(row.n)||!Number.isFinite(row.time)||!['win','loss','unresolved'].includes(row.outcome)||(row.profit!==null&&!Number.isSafeInteger(row.profit)))throw Error('Invalid saved history');
       if (new Set(s.history.map(r=>r.n)).size!==s.history.length) throw Error('Duplicate saved outcomes');
       if (s.sequence<=500 && (s.history.length!==s.sequence||s.history.filter(r=>r.outcome==='win').length!==s.wins||s.history.filter(r=>r.outcome==='loss').length!==s.losses||s.history.filter(r=>r.outcome==='unresolved').length!==s.unknown||s.history.reduce((n,r)=>n+(r.profit||0),0)!==s.net)) throw Error('Saved results do not reconcile');
-      if (s.pending && (![s.pending.ask,s.pending.gross,s.pending.entryEpoch,s.pending.pip].every(Number.isSafeInteger)||s.pending.ask<35||s.pending.gross<=s.pending.ask||s.pending.digit!==engine.cfg.digit||s.pending.symbol!==engine.cfg.symbol||s.pending.pip<0||s.pending.pip>20)) throw Error('Invalid saved open entry');
+      if (s.pending && (![s.pending.ask,s.pending.gross,s.pending.entryEpoch,s.pending.pip].every(Number.isSafeInteger)||s.pending.ask<35||s.pending.gross<=s.pending.ask||(!engine.cfg.auto&&s.pending.digit!==engine.cfg.digit)||!Number.isInteger(s.pending.digit)||s.pending.digit<0||s.pending.digit>9||s.pending.symbol!==engine.cfg.symbol||s.pending.pip<0||s.pending.pip>20)) throw Error('Invalid saved open entry');
       for(const key of ['net','wins','losses','unknown','peak','maxDD','sequence','history','pending','status'])engine[key]=s[key];
       engine.reason=typeof s.reason==='string'?s.reason.slice(0,600):'Restored virtual session';engine.lastEpoch=0;
       if(engine.pending){engine.interrupt('Page refreshed during an open virtual entry · outcome unresolved');}
@@ -99,5 +112,5 @@
       return engine;
     }
   }
-  return {Engine,quote,STAGES,MAX_TRADES};
+  return {Engine,quote,signal,STAGES,MAX_TRADES};
 });

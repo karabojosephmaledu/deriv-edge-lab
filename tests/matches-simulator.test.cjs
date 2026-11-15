@@ -66,3 +66,22 @@ test('saved P/L must reconcile with its actual virtual outcomes',()=>{
  assert.throws(()=>M.Engine.restore({...a.e.snapshot(),net:100000}));
  assert.throws(()=>M.Engine.restore({...a.e.snapshot(),history:[]}));
 });
+
+test('automatic digit selection uses only a common most frequent digit in 50/150/200 past observations',()=>{
+ const rows=Array.from({length:200},(_,i)=>({epoch:1000+i*2,digit:7}));
+ assert.equal(M.signal(rows,1398).digit,7);
+ assert.equal(M.signal(rows.slice(1),1398),null);
+ const disagree=rows.map((r,i)=>({...r,digit:i<150?2:7}));assert.equal(M.signal(disagree,1398),null);
+ const tied=rows.map((r,i)=>({...r,digit:i%10}));assert.equal(M.signal(tied,1398),null);
+ assert.equal(M.signal([...rows,...Array.from({length:200},(_,i)=>({epoch:1400+i*2,digit:3}))],1398).digit,7);
+ assert.equal(M.signal(rows.map((r,i)=>i===50?{...r,epoch:r.epoch+1}:r),1398),null);
+});
+test('automatic entries freeze their chosen digit before the fill tick and settle against that digit',()=>{
+ const e=new M.Engine({...cfg,auto:true,digit:0});e.start();
+ const q={...M.quote(response(),1,'R_100',7,10000),signalEpoch:1000};
+ e.feed({symbol:'R_100',price:100.01,pip:2,epoch:1002},q,10000);
+ assert.equal(e.pending.digit,7);
+ e.feed({symbol:'R_100',price:100.07,pip:2,epoch:1004},null,10000);assert.equal(e.net,733);
+ assert.equal(M.Engine.restore(e.snapshot()).net,733);
+ const next=new M.Engine({...cfg,auto:true});next.start();next.feed({symbol:'R_100',price:100.01,pip:2,epoch:1002},{...q,signalEpoch:1002},10000);assert.equal(next.pending,null);
+});
