@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {inflateSync} from 'node:zlib';
-import {loadVisionSlots,visionModels,runVisionSlots,VisionSlotsError,createVisionProbe} from '../src/lib/vision-slots.server.ts';
+import {loadVisionSlots,visionModels,runVisionSlots,VisionSlotsError,createVisionProbe} from '../../backend/chartscanner/src/lib/vision-slots.server.ts';
 
 function quadrantNames(uri){
  const b=Buffer.from(uri.split(',')[1],'base64');let at=8,parts=[];

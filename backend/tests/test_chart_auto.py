@@ -2,6 +2,11 @@
 import asyncio
 import copy
 import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
 import time
 from types import SimpleNamespace
 
@@ -11,6 +16,7 @@ from fastapi.testclient import TestClient
 from tests.test_demo_execution import Collection,DEMO,REAL,TOKEN,ORIGIN
 from lib.deriv_demo import DemoError,DemoRejected,Session,INSTANCE
 from lib.chart_strategy import FRAMES,closed_candles,price_plan,quote_limits,verify_final_quote,render_chart
+from lib import chart_strategy
 from routers import chart_auto,deriv
 from routers.chart_auto import AutoConfig,Run,Runtime,execution_url
 
@@ -353,3 +359,41 @@ async def test_pause_during_durable_order_intent_still_prevents_the_buy(action):
     assert not any("buy" in q for q in r.channel.calls)
     assert not r.pending and not r.unresolved
     assert next(iter(rt.db.chart_orders.rows.values()))["status"]=="not_sent"
+
+
+@pytest.mark.parametrize("version,available",[("v22.22.0",False),("v24.22.1",True),("v26.0.0",False)])
+def test_runtime_checks_the_actual_supported_node_major(monkeypatch,version,available):
+    chart_strategy.node_version.cache_clear()
+    monkeypatch.setattr(chart_strategy.shutil,"which",lambda _:"/controlled/node")
+    monkeypatch.setattr(chart_strategy.subprocess,"run",lambda *a,**kw:SimpleNamespace(stdout=version+"\n"))
+    try:
+        result=chart_strategy.runtime_status()
+        assert result["node_version"]==version and result["node_available"] is available
+    finally:chart_strategy.node_version.cache_clear()
+
+
+def test_missing_node_is_not_reported_as_ready(monkeypatch):
+    monkeypatch.setattr(chart_strategy.shutil,"which",lambda _:None)
+    result=chart_strategy.runtime_status()
+    assert result["node_version"] is None and not result["node_available"]
+
+
+def test_missing_bundled_worker_blocks_start_before_any_order(monkeypatch,tmp_path):
+    monkeypatch.setattr(chart_strategy,"WORKER",tmp_path/"missing.ts")
+    assert chart_auto.flags()["worker_available"] is False
+    with pytest.raises(DemoError,match="bundled scanner"):chart_auto.require_enabled(configuration())
+
+
+def test_render_backend_only_checkout_contains_a_loadable_original_worker(tmp_path):
+    # Render rootDir=backend excludes all sibling directories. Reproduce that
+    # exact packaging instead of relying on the whole developer workspace.
+    backend=Path(__file__).resolve().parents[1]
+    isolated=tmp_path/"backend"
+    shutil.copytree(backend,isolated,ignore=shutil.ignore_patterns("__pycache__",".pytest_cache",".env","tests"))
+    env={**os.environ,"PYTHONPATH":str(isolated)}
+    for key in list(env):
+        if key.startswith("CHART_AI_SLOT_"):env.pop(key)
+    result=subprocess.run([sys.executable,"-c",'from lib.chart_strategy import WORKER,runtime_status; import subprocess; assert runtime_status()["node_available"]; assert WORKER.is_file(); r=subprocess.run(["node",str(WORKER)],input=\'{"images":[]}\',text=True,capture_output=True); assert r.returncode==1 and "unverified" in r.stdout; print("backend-only worker import passed")'],
+        cwd=isolated,env=env,capture_output=True,text=True,timeout=10)
+    assert result.returncode==0,result.stderr
+    assert "backend-only worker import passed" in result.stdout
