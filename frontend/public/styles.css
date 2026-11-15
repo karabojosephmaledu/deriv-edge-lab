@@ -912,3 +912,10 @@ button { font-family: inherit; }
   }
   .digit:hover { transform: none; }
 }
+
+/* Keep the restored sound control from overlapping the brand on narrow phones. */
+@media (max-width: 600px) {
+  .topbar-inner { flex-wrap: wrap; }
+  .topbar-actions { width: 100%; justify-content: flex-end; }
+  .topbar-actions .btn { white-space: nowrap; }
+}

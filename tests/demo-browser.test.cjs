@@ -162,6 +162,11 @@ test("browser Demo: OAuth cookie login works with no access token in the respons
   await page.locator("#execution-mode").selectOption("demo");
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   assert.ok(overflow <= 2, `Mobile overflow: ${overflow}`);
+  const header = await page.evaluate(() => {
+    const brand = document.querySelector('.brand').getBoundingClientRect(), controls = document.querySelector('.topbar-actions').getBoundingClientRect();
+    return { brandBottom: brand.bottom, controlsTop: controls.top };
+  });
+  assert.ok(header.controlsTop >= header.brandBottom, 'Mobile header controls must occupy their own row');
 });
 
 test("browser Demo: late status responses cannot replace newer controls or balances", { timeout: 15000 }, async (t) => {
