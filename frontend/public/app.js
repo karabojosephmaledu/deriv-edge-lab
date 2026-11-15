@@ -560,6 +560,9 @@ function liveSimulationReady() {
 
 function onTick(tick, synthetic = false) {
   if (!tick || tick.symbol !== state.settings.symbol) return;
+  // Number() also coerces booleans, arrays and blank strings; those are not market data.
+  if (![tick.quote, tick.pip_size, tick.epoch].every((v) =>
+    typeof v === "number" || (typeof v === "string" && v.trim() !== ""))) return;
   const pip = Number(tick.pip_size);
   const price = Number(tick.quote);
   const epoch = Number(tick.epoch);

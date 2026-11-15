@@ -278,6 +278,8 @@ for (const patch of [
   { symbol: "R_25" }, { symbol: undefined }, { quote: NaN }, { quote: Infinity },
   { quote: 0 }, { quote: -100 }, { pip_size: -1 }, { pip_size: 100 },
   { pip_size: 1.5 }, { pip_size: null }, { epoch: 0 }, { epoch: NaN },
+  { quote: true }, { quote: [100.05] }, { pip_size: "" }, { pip_size: " " },
+  { pip_size: false }, { pip_size: [] }, { epoch: [1004] },
 ]) {
   test(`5: rejects invalid/wrong-market tick ${JSON.stringify(patch)} before mutation`, () => {
     const a = harness();
@@ -299,6 +301,15 @@ test("5: duplicate and delayed ticks cannot settle a position or double-count ob
   a.tick(100.02);
   assert.equal(a.state.stats.net, 9);
   assert.equal(a.state.stats.trades, 1);
+});
+
+test("5: valid numeric strings remain compatible with Deriv data", () => {
+  const a = harness();
+  a.startSession(); a.tick();
+  a.tick("100.05", { pip_size: "2", epoch: "1004" });
+  assert.equal(a.state.stats.trades, 1);
+  assert.equal(a.state.stats.losses, 1);
+  assert.equal(a.state.lastPip, 2);
 });
 
 test("5: a missing tick is unresolved, rather than using the wrong tick as a one-tick settlement", () => {
