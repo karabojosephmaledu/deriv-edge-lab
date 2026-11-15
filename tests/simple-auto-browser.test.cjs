@@ -150,3 +150,10 @@ test('pausing a delayed quote cannot create a practice entry later',{timeout:150
  await page.evaluate(()=>window.__lateQuote());await page.evaluate(()=>window.__tick());
  assert.equal(await page.evaluate(()=>matchesLab.engine.pending),null);assert.equal(await page.locator('#matches-start').innerText(),'Resume');
 });
+
+test('phone outcome animation stays inside the practice panel without horizontal page movement',{timeout:15000},async t=>{
+ const page=await open(t,{mobile:true});await page.locator('#matches-start').click();await quoted(page);
+ await page.evaluate(()=>{window.__tick();window.__tick(100.07);const el=document.getElementById('result-flash');for(const animation of el.getAnimations()){animation.pause();animation.currentTime=210;}});
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)<=2);
+ assert.equal(await page.locator('#matches-testing').evaluate(el=>getComputedStyle(el).position),'relative');
+});
