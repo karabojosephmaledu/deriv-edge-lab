@@ -177,21 +177,34 @@ function ssSet(key, value) {
 
 /* --------------------------------- config -------------------------------- */
 
-async function loadConfig() {
+const CONFIG_RETRY_DELAYS = [5000, 10000, 15000, 20000];
+let configRetryTimer = null;
+
+async function loadConfig(attempt = 0) {
+  let timer;
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 4000);
-    const res = await fetch("/api/deriv/config", { signal: ctrl.signal });
-    clearTimeout(timer);
-    if (!res.ok) return;
+    timer = setTimeout(() => ctrl.abort(), 4000);
+    const res = await fetch("/api/deriv/config", { signal: ctrl.signal, cache: "no-store" });
+    if (!res.ok) throw new Error("config-unavailable");
     const d = await res.json();
+    if (!d || typeof d.oauth_ready !== "boolean") throw new Error("invalid-config");
     if (d.app_id && d.app_id !== "1089") state.cfg.app_id = String(d.app_id);
     if (d.public_ws_url) state.cfg.public_ws_url = d.public_ws_url;
     if (d.api_base) state.cfg.api_base = d.api_base;
     if (d.oauth_authorize_url) state.cfg.oauth_authorize_url = d.oauth_authorize_url;
     state.cfg.oauth_ready = !!d.oauth_ready;
+    clearTimeout(configRetryTimer);
+    configRetryTimer = null;
+    // A Free backend can wake after the user has already opened the connection dialog.
+    $("oauth-block").hidden = !state.cfg.oauth_ready;
   } catch {
-    /* standalone (e.g. CodePen): API-token connect still works */
+    // Retry in the background so a sleeping backend never blocks public market data.
+    if (attempt < CONFIG_RETRY_DELAYS.length) {
+      configRetryTimer = setTimeout(() => loadConfig(attempt + 1), CONFIG_RETRY_DELAYS[attempt]);
+    }
+  } finally {
+    clearTimeout(timer);
   }
 }
 

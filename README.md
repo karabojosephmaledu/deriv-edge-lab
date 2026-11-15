@@ -17,7 +17,7 @@ frontend/public/favicon.svg  logo
 backend/server.py            FastAPI app, every route under /api
 backend/routers/deriv.py     /api/deriv/config, /callback, /token (OAuth code exchange)
 render.yaml                  Render blueprint
-env.example                  variable NAMES only (backend/.env.example is the same file)
+env.example                  configuration template (no credentials)
 ```
 
 The React/TypeScript files in `frontend/src` belong to the original template and are not used: `index.html` loads `/app.js` directly.
@@ -35,7 +35,7 @@ The React/TypeScript files in `frontend/src` belong to the original template and
 ```bash
 cd backend
 pip install -r requirements.txt
-cp .env.example .env   # then fill in the values
+cp ../env.example .env   # then fill in the values privately
 uvicorn server:app --port 8001 --reload
 # frontend: any static server that proxies /api → :8001, e.g. the Vite dev server:
 cd ../frontend && yarn install && yarn dev   # http://localhost:3000
@@ -45,11 +45,55 @@ With no backend at all (for example on CodePen), the dashboard still runs. Live 
 
 ## Deploy on Render
 
-1. Push the repo to GitHub (keep your existing backup; push to a new branch if you're unsure).
-2. In Render, choose **New → Blueprint** and pick the repo. `render.yaml` creates the API service and the static site.
-3. Create a free MongoDB Atlas cluster and set `MONGO_URL`, `CORS_ORIGINS` (your static-site URL), and `DERIV_APP_ID` on the API service.
-4. If Render names the API service differently, update the rewrite destination in `render.yaml`.
-5. In developers.deriv.com → your app, add the redirect URL `https://<your-static-site>.onrender.com/api/deriv/callback`.
+The existing backend is `https://deriv-edge-lab-2oux.onrender.com`. Reuse it; creating a new Blueprint instance can create a duplicate backend. The Blueprint remains a reference for the two-service configuration and explicitly selects Free compute and the tested Python version. Do not apply hosting changes until deployment is approved.
+
+Existing Python backend settings:
+
+| Setting | Value |
+|---|---|
+| Runtime / compute | Python 3 / Free |
+| Root directory | `backend` |
+| Build command | `pip install -r requirements.txt` |
+| Start command | `uvicorn server:app --host 0.0.0.0 --port $PORT` |
+| Python version | `PYTHON_VERSION=3.12.14` |
+| Health check | `/api/deriv/config` |
+
+The backend's `/` returns 404 because no root route is defined. `/api/` and `/api/deriv/config` exist. The config endpoint does not access MongoDB and its `oauth_ready` flag means an App ID is configured, not that a login has been verified. The dashboard uses the backend's same-origin `/api/*` proxy. Configuration retries are bounded and run in the background when a Free backend is waking; market data does not wait for all retries.
+
+### MongoDB Atlas authentication
+
+Keep `MONGO_URL` exclusively in **Render → existing backend → Environment**. Set `DB_NAME=deriv_edge_lab`. The code passes the URI to Motor/PyMongo without rewriting credentials or `authSource`; `DB_NAME` selects the application database separately from the authentication database.
+
+If fresh logs still report `bad auth` / code 8000:
+
+1. Open the Atlas project containing the intended cluster. Under **Security → Database Access**, confirm the database username. This is a database user, separate from the account used to sign in to Atlas. Reset that user's password only if needed. Give the app user `readWrite` on `deriv_edge_lab` so it can read/write status checks and create their index.
+2. Under the cluster's **Connect → Drivers → Python**, obtain a fresh connection-string template. Fill its username/password privately. Percent-encode reserved characters in those components exactly once; do not encode the entire URI or keep placeholder brackets. Atlas SRV connections normally obtain `authSource=admin` from DNS; retain the Atlas-generated options and remove an incorrect explicit authSource override. Do not disable TLS or certificate verification.
+3. In Render's backend Environment, edit **MONGO_URL** with the completed URI, without surrounding quotes or accidental whitespace. Never put it in GitHub, frontend variables, screenshots, or chat. Apply the environment update when ready for its restart/redeployment.
+4. Keep the service's current outbound ranges allowed in Atlas Network Access (`74.220.48.0/24` and `74.220.56.0/24`, as supplied for this service). Recheck Render's outbound ranges if the service/region changes.
+5. After the backend restarts, check fresh logs and open `/api/status`. HTTP 200 with a JSON list verifies a database read; it does not alone verify writes/index creation. Avoid resetting a working password because of an old log entry.
+
+See [Atlas authentication troubleshooting](https://www.mongodb.com/docs/atlas/troubleshoot-connection/) and [MongoDB URI options](https://www.mongodb.com/docs/manual/reference/connection-string-options/).
+
+### Existing dashboard as a Render Static Site
+
+After merge/deployment approval, choose **New → Static Site** and connect this repository:
+
+| Setting | Value |
+|---|---|
+| Branch | `main` after the deployment fix is merged |
+| Root directory | Leave blank (repository root) |
+| Build command | `mkdir -p site && cp frontend/index.html site/ && cp -r frontend/public/. site/` |
+| Publish directory | `site` |
+| Start command | None |
+| Rewrite source | `/api/*` |
+| Rewrite destination | `https://deriv-edge-lab-2oux.onrender.com/api/*` |
+| Rewrite action | **Rewrite**, not Redirect |
+
+This copies the existing HTML, CSS, JavaScript and assets. No Node server or React rebuild is required for the static dashboard. No secrets or frontend environment variables are required.
+
+Once Render assigns the frontend HTTPS URL, set the backend's **CORS_ORIGINS** to that exact origin (no path or trailing slash). In the existing Deriv OAuth application's settings, use that origin as Website URL and register `<frontend-origin>/api/deriv/callback` as the exact Redirect URL. The frontend proxy must preserve the callback query parameters and forward POST `/api/deriv/token`. Returning through the frontend origin preserves the PKCE state stored by that browser tab. The current PKCE code does not require a client secret.
+
+For acceptance, open `<frontend-origin>/api/deriv/config` and confirm JSON from the backend, then open the dashboard in desktop/mobile Chrome. Verify a real live-price status (not the labelled synthetic fallback). Test OAuth through Deriv in the same tab and confirm returned account data before considering login successful. The frontend HTTPS URL is also the Android preview/website URL; no purchased domain is required. Live Deriv, OAuth and Atlas write access must be verified after deployment, not inferred from local mock tests.
 
 ## Simulation rules
 
