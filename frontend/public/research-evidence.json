@@ -1,0 +1,459 @@
+{
+  "version": 1,
+  "source": "PR #7 fixed-protocol evaluation; benchmark category summaries only",
+  "frozenCommit": "75fa03e027719195aa460275a280444de1785894",
+  "evaluationSha256": "6c3237d7426506c546406c0c4b4706e1b1532e0d2e33a599f7be0f5c34792315",
+  "historicalFindings": {
+    "testsPassed": 166,
+    "ticks": 20000,
+    "originalBenchmarks": 23,
+    "addedAlternatives": 7,
+    "oldSelectorNet": -226.39,
+    "rebuiltDecision": "NO TRADE",
+    "touchNet": 23.5,
+    "touchTrades": 95,
+    "qualifiedStrategies": 0
+  },
+  "categories": [
+    {
+      "id": "differs",
+      "name": "Digit Differs",
+      "benchmark": "diff-fixed",
+      "description": "Wins if the final digit differs from the selected digit. Under independent uniform digits, the theoretical win probability is 90%.",
+      "hypotheticalStake": 10,
+      "prices": [
+        {
+          "symbol": "R_100",
+          "source": "Saved public proposal scenario; not a historical executable quote",
+          "capturedAt": 1794734790,
+          "originalQuoteStake": 50,
+          "originalQuotePayout": 54.82,
+          "hypotheticalStake": 10,
+          "gross": 10.96,
+          "profit": 0.96,
+          "maxLoss": 10,
+          "breakEven": 0.9124087591240875,
+          "probabilityAssumption": 0.9,
+          "expectedValue": -0.14,
+          "barrier": "5",
+          "durationSeconds": null,
+          "growthRate": null,
+          "multiplier": null,
+          "commission": null
+        },
+        {
+          "symbol": "R_25",
+          "source": "Saved public proposal scenario; not a historical executable quote",
+          "capturedAt": 1794735031,
+          "originalQuoteStake": 50,
+          "originalQuotePayout": 54.82,
+          "hypotheticalStake": 10,
+          "gross": 10.96,
+          "profit": 0.96,
+          "maxLoss": 10,
+          "breakEven": 0.9124087591240875,
+          "probabilityAssumption": 0.9,
+          "expectedValue": -0.14,
+          "barrier": "5",
+          "durationSeconds": null,
+          "growthRate": null,
+          "multiplier": null,
+          "commission": null
+        }
+      ],
+      "trades": 2664,
+      "wins": 2406,
+      "losses": 258,
+      "winRate": 0.9031531531531531,
+      "net": -270.24,
+      "meanReturn": -0.10144144144144145,
+      "maxDrawdown": 184.56,
+      "observedAverageWinRange": [
+        0.96,
+        0.96,
+        0.96,
+        0.96
+      ],
+      "observedAverageLossRange": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "empiricalBreakEven": [
+        0.9124087591240875,
+        0.9124087591240875,
+        0.9124087591240875,
+        0.9124087591240875
+      ],
+      "activeWindows": 4,
+      "positiveWindows": 0,
+      "qualifiedWindows": 0,
+      "verdict": "FAILED",
+      "limitations": "Four independent historical test windows. Saved public pricing and modeled fills are assumptions; no forward profitability or account execution is supported. Unavailable quotes are excluded, not replaced. Positive totals alone do not pass the research criteria."
+    },
+    {
+      "id": "accu",
+      "name": "Accumulator",
+      "benchmark": "accu",
+      "description": "Virtual growth continues while each observed tick stays inside the modeled barrier. A breach loses the stake. Growth and barrier assumptions are not a guaranteed payout.",
+      "hypotheticalStake": 10,
+      "prices": [
+        {
+          "symbol": "R_100",
+          "source": "Saved public proposal scenario; not a historical executable quote",
+          "capturedAt": 1794734793,
+          "originalQuoteStake": 50,
+          "originalQuotePayout": null,
+          "hypotheticalStake": 10,
+          "gross": null,
+          "profit": null,
+          "maxLoss": 10,
+          "breakEven": null,
+          "probabilityAssumption": null,
+          "expectedValue": null,
+          "barrier": 0.000536927765,
+          "durationSeconds": null,
+          "growthRate": 0.03,
+          "multiplier": null,
+          "commission": null
+        },
+        {
+          "symbol": "R_25",
+          "source": "Saved public proposal scenario; not a historical executable quote",
+          "capturedAt": 1794735050,
+          "originalQuoteStake": 50,
+          "originalQuotePayout": null,
+          "hypotheticalStake": 10,
+          "gross": null,
+          "profit": null,
+          "maxLoss": 10,
+          "breakEven": null,
+          "probabilityAssumption": null,
+          "expectedValue": null,
+          "barrier": 0.000134231941,
+          "durationSeconds": null,
+          "growthRate": 0.03,
+          "multiplier": null,
+          "commission": null
+        }
+      ],
+      "trades": 1316,
+      "wins": 1157,
+      "losses": 159,
+      "winRate": 0.8791793313069909,
+      "net": -132.18,
+      "meanReturn": -0.10044072948328268,
+      "maxDrawdown": 114.6,
+      "observedAverageWinRange": [
+        1.26,
+        1.26,
+        1.26,
+        1.26
+      ],
+      "observedAverageLossRange": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "empiricalBreakEven": [
+        0.8880994671403197,
+        0.8880994671403197,
+        0.8880994671403197,
+        0.8880994671403197
+      ],
+      "activeWindows": 4,
+      "positiveWindows": 0,
+      "qualifiedWindows": 0,
+      "verdict": "FAILED",
+      "limitations": "Four independent historical test windows. Saved public pricing and modeled fills are assumptions; no forward profitability or account execution is supported. Unavailable quotes are excluded, not replaced. Positive totals alone do not pass the research criteria."
+    },
+    {
+      "id": "mult",
+      "name": "Multiplier",
+      "benchmark": "mult",
+      "description": "Virtual P/L follows direction, price move and leverage, minus the saved commission. The exit value is variable; an intended stop can slip at the next observed tick.",
+      "hypotheticalStake": 10,
+      "prices": [
+        {
+          "symbol": "R_100",
+          "source": "Saved public proposal scenario; not a historical executable quote",
+          "capturedAt": 1794734794,
+          "originalQuoteStake": 50,
+          "originalQuotePayout": null,
+          "hypotheticalStake": 10,
+          "gross": null,
+          "profit": null,
+          "maxLoss": 10,
+          "breakEven": null,
+          "probabilityAssumption": null,
+          "expectedValue": null,
+          "barrier": null,
+          "durationSeconds": null,
+          "growthRate": null,
+          "multiplier": 100,
+          "commission": 0.36
+        },
+        {
+          "symbol": "R_25",
+          "source": "Saved public proposal scenario; not a historical executable quote",
+          "capturedAt": 1794735053,
+          "originalQuoteStake": 50,
+          "originalQuotePayout": null,
+          "hypotheticalStake": 10,
+          "gross": null,
+          "profit": null,
+          "maxLoss": 10,
+          "breakEven": null,
+          "probabilityAssumption": null,
+          "expectedValue": null,
+          "barrier": null,
+          "durationSeconds": null,
+          "growthRate": null,
+          "multiplier": 400,
+          "commission": 0.34
+        }
+      ],
+      "trades": 107,
+      "wins": 67,
+      "losses": 40,
+      "winRate": 0.6261682242990654,
+      "net": -42.94,
+      "meanReturn": -0.40130841121495325,
+      "maxDrawdown": 26.21,
+      "observedAverageWinRange": [
+        1.08,
+        1.17,
+        1.15,
+        1.13
+      ],
+      "observedAverageLossRange": [
+        2.95,
+        3.19,
+        3.48,
+        2.11
+      ],
+      "empiricalBreakEven": [
+        0.7317049623479437,
+        0.7325425674383012,
+        0.7517641216348874,
+        0.651378271948112
+      ],
+      "activeWindows": 4,
+      "positiveWindows": 1,
+      "qualifiedWindows": 0,
+      "verdict": "FAILED",
+      "limitations": "Four independent historical test windows. Saved public pricing and modeled fills are assumptions; no forward profitability or account execution is supported. Unavailable quotes are excluded, not replaced. Positive totals alone do not pass the research criteria."
+    },
+    {
+      "id": "matches",
+      "name": "Digit Matches",
+      "benchmark": "match-fixed",
+      "description": "Wins if the final digit matches the selected digit. Under independent uniform digits each digit has a theoretical 10% probability; frequent past digits do not prove a prediction.",
+      "hypotheticalStake": 10,
+      "prices": [
+        {
+          "symbol": "R_100",
+          "source": "Saved public proposal scenario; not a historical executable quote",
+          "capturedAt": 1794734790,
+          "originalQuoteStake": 50,
+          "originalQuotePayout": 446.43,
+          "hypotheticalStake": 10,
+          "gross": 89.29,
+          "profit": 79.29,
+          "maxLoss": 10,
+          "breakEven": 0.11199462425803561,
+          "probabilityAssumption": 0.1,
+          "expectedValue": -1.07,
+          "barrier": "5",
+          "durationSeconds": null,
+          "growthRate": null,
+          "multiplier": null,
+          "commission": null
+        },
+        {
+          "symbol": "R_25",
+          "source": "Saved public proposal scenario; not a historical executable quote",
+          "capturedAt": 1794735032,
+          "originalQuoteStake": 50,
+          "originalQuotePayout": 446.43,
+          "hypotheticalStake": 10,
+          "gross": 89.29,
+          "profit": 79.29,
+          "maxLoss": 10,
+          "breakEven": 0.11199462425803561,
+          "probabilityAssumption": 0.1,
+          "expectedValue": -1.07,
+          "barrier": "5",
+          "durationSeconds": null,
+          "growthRate": null,
+          "multiplier": null,
+          "commission": null
+        }
+      ],
+      "trades": 2197,
+      "wins": 208,
+      "losses": 1989,
+      "winRate": 0.09467455621301775,
+      "net": -3397.68,
+      "meanReturn": -1.5465088757396448,
+      "maxDrawdown": 1291.3,
+      "observedAverageWinRange": [
+        79.29,
+        79.29,
+        79.29,
+        79.29
+      ],
+      "observedAverageLossRange": [
+        10,
+        10,
+        10,
+        10
+      ],
+      "empiricalBreakEven": [
+        0.11199462425803561,
+        0.11199462425803562,
+        0.11199462425803561,
+        0.11199462425803562
+      ],
+      "activeWindows": 4,
+      "positiveWindows": 0,
+      "qualifiedWindows": 0,
+      "verdict": "FAILED",
+      "limitations": "Four independent historical test windows. Saved public pricing and modeled fills are assumptions; no forward profitability or account execution is supported. Unavailable quotes are excluded, not replaced. Positive totals alone do not pass the research criteria."
+    },
+    {
+      "id": "touch",
+      "name": "Touch",
+      "benchmark": "touch",
+      "description": "Wins if the observed price reaches the specified upper barrier at any point during 120 seconds. Probability depends on barrier distance, duration and price behaviour; 50% below is only an illustration.",
+      "hypotheticalStake": 10,
+      "prices": [
+        {
+          "symbol": "R_100",
+          "source": "Saved public proposal scenario; not a historical executable quote",
+          "capturedAt": 1794734793,
+          "originalQuoteStake": 50,
+          "originalQuotePayout": 88.48,
+          "hypotheticalStake": 10,
+          "gross": 17.7,
+          "profit": 7.7,
+          "maxLoss": 10,
+          "breakEven": 0.5649717514124294,
+          "probabilityAssumption": 0.5,
+          "expectedValue": -1.15,
+          "barrier": "+0.59",
+          "durationSeconds": 120,
+          "growthRate": null,
+          "multiplier": null,
+          "commission": null
+        },
+        {
+          "symbol": "R_25",
+          "unavailable": true,
+          "reason": "Minimum stake of 0.35 and maximum payout of 1000.00. Current payout is 1125.75."
+        }
+      ],
+      "trades": 95,
+      "wins": 55,
+      "losses": 40,
+      "winRate": 0.5789473684210527,
+      "net": 23.5,
+      "meanReturn": 0.24736842105263157,
+      "maxDrawdown": 111.5,
+      "observedAverageWinRange": [
+        7.7,
+        7.7
+      ],
+      "observedAverageLossRange": [
+        10,
+        10
+      ],
+      "empiricalBreakEven": [
+        0.5649717514124294,
+        0.5649717514124294
+      ],
+      "activeWindows": 2,
+      "positiveWindows": 1,
+      "qualifiedWindows": 0,
+      "verdict": "INCONCLUSIVE",
+      "limitations": "Four independent historical test windows. Saved public pricing and modeled fills are assumptions; no forward profitability or account execution is supported. Unavailable quotes are excluded, not replaced. Positive totals alone do not pass the research criteria."
+    },
+    {
+      "id": "notouch",
+      "name": "No Touch",
+      "benchmark": "notouch",
+      "description": "Wins if the observed price never reaches the specified upper barrier during 120 seconds. This is a separate outcome condition from Touch; 50% below is only an illustration.",
+      "hypotheticalStake": 10,
+      "prices": [
+        {
+          "symbol": "R_100",
+          "source": "Saved public proposal scenario; not a historical executable quote",
+          "capturedAt": 1794734793,
+          "originalQuoteStake": 50,
+          "originalQuotePayout": 108.95,
+          "hypotheticalStake": 10,
+          "gross": 21.79,
+          "profit": 11.79,
+          "maxLoss": 10,
+          "breakEven": 0.4589261128958238,
+          "probabilityAssumption": 0.5,
+          "expectedValue": 0.89,
+          "barrier": "+0.59",
+          "durationSeconds": 120,
+          "growthRate": null,
+          "multiplier": null,
+          "commission": null
+        },
+        {
+          "symbol": "R_25",
+          "source": "Saved public proposal scenario; not a historical executable quote",
+          "capturedAt": 1794735049,
+          "originalQuoteStake": 50,
+          "originalQuotePayout": 51.04,
+          "hypotheticalStake": 10,
+          "gross": 10.21,
+          "profit": 0.21,
+          "maxLoss": 10,
+          "breakEven": 0.979431929480901,
+          "probabilityAssumption": 0.5,
+          "expectedValue": -4.89,
+          "barrier": "+2.94",
+          "durationSeconds": 120,
+          "growthRate": null,
+          "multiplier": null,
+          "commission": null
+        }
+      ],
+      "trades": 159,
+      "wins": 102,
+      "losses": 57,
+      "winRate": 0.6415094339622641,
+      "net": -85.38,
+      "meanReturn": -0.5369811320754717,
+      "maxDrawdown": 128.52,
+      "observedAverageWinRange": [
+        11.79,
+        11.79,
+        0.21,
+        0.21
+      ],
+      "observedAverageLossRange": [
+        10,
+        10,
+        10
+      ],
+      "empiricalBreakEven": [
+        0.4589261128958238,
+        0.4589261128958238,
+        0.979431929480901
+      ],
+      "activeWindows": 4,
+      "positiveWindows": 2,
+      "qualifiedWindows": 0,
+      "verdict": "FAILED",
+      "limitations": "Four independent historical test windows. Saved public pricing and modeled fills are assumptions; no forward profitability or account execution is supported. Unavailable quotes are excluded, not replaced. Positive totals alone do not pass the research criteria."
+    }
+  ]
+}

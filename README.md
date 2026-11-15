@@ -12,7 +12,8 @@ A research dashboard for Deriv Volatility indices:
 ```
 frontend/index.html          markup (the app)
 frontend/public/styles.css   styling
-frontend/public/app.js       dashboard and unchanged research simulator (vanilla JS)
+frontend/public/app.js       dashboard and research simulator (vanilla JS)
+frontend/public/research.js  isolated virtual wallet and strategy studies
 frontend/public/favicon.svg  logo
 backend/server.py            FastAPI app, every route under /api
 backend/routers/deriv.py     OAuth/session and CSRF-protected Demo APIs
@@ -138,7 +139,7 @@ Deployment requires approval. This build includes the pending cold-start/routing
 2. Use one Uvicorn worker (`--workers 1`). Account sessions and OAuth/PAT credentials live only in that worker's memory. A restart/expiry requires sign-in again; durable account locks still prevent a duplicate buy.
 3. In Render's backend Environment, enable `DERIV_DEMO_TRADING_ENABLED=true` only as part of the approved deployment. Configure `CORS_ORIGINS=https://deriv-edge-lab-1.onrender.com`. Both are non-secret settings. Keep all passwords/tokens in Render/Atlas; never paste them into chat or GitHub. Default execution remains disabled.
 4. Deploy both services after approval and reconnect through the existing verified Deriv OAuth application. The callback stays `https://deriv-edge-lab-1.onrender.com/api/deriv/callback`.
-5. In the dashboard choose **Deriv Demo · actual Demo contracts**, set the product/market, stake and limits, then click **Start Demo trading**. Connecting an account alone never starts orders. The first live acceptance test should use the minimum supported stake in the Demo account and verify the contract ID and actual account debit/settlement in Deriv. No acceptance orders were placed during development.
+5. In the dashboard choose **Deriv Demo · actual Demo contracts**, set the product/market, stake and limits, then click **Start Demo trading**. Demo execution keeps the existing manually selected digit. Automatic digit rules are research comparisons only. Connecting an account alone never starts orders. The first live acceptance test should use the minimum supported stake in the Demo account and verify the contract ID and actual account debit/settlement in Deriv. No acceptance orders were placed by development tools.
 
 Only active USD Demo accounts are supported by this execution build. Real accounts and `/ws/real` connections are rejected on the backend, regardless of browser settings. Research mode remains available and sends no orders.
 
@@ -159,3 +160,22 @@ python -m pytest tests/test_demo_execution.py
 ```
 
 The original backend endpoint tests still require the local test server described in `backend/tests/conftest.py`. Live Render cookie forwarding, OAuth, authenticated WebSocket connectivity and the first actual Demo order require acceptance testing after deployment; mocks cannot verify those connections.
+
+## Virtual research update (separate review branch)
+
+The optional Strategy comparison panel now includes **Virtual strategy and risk study**. It compares 23 references/candidates using a separate virtual balance, public quotes, explicit costs, next-tick simulated entries, and training/validation/holdout boundaries. It includes Differs, Matches, Over/Under, Rise/Fall, Touch/No Touch, Accumulators and Multipliers, plus flat/Paroli/Martingale risk comparisons. It never changes the authorised account's strategy, balance or orders.
+
+Manual digit controls and Demo entry configuration are preserved. Automatic cold-digit strategies remain confined to the virtual comparison engine. Demo tickets use authenticated entry quotes or actual winning settlements, not public payout previews. Authorised Demo/Real account identification and timestamped balances are available in a read-only REST list; Real accounts cannot be selected for execution. The existing login still requires an active USD Demo account.
+
+See [the complete research report and completion checklist](research/REVIEW.md) for real sampled results, sources, limitations and reproduction commands. The validation-selected strategies lost money on held-out samples; this work does **not** deliver a proven profitable bot. The new branch requires approval before merge or deployment. No new packages or services are needed.
+
+
+## Research rebuild v2 (separate approval)
+
+The rebuild retains all 23 earlier references and adds seven virtual-only alternatives. It fixes the biased random reference, premature rounding in empirical break-even, and weak payout validation. A strict research screen returns **NO TRADE** when evidence or risk constraints are not met; no fixed-strategy fallback is promoted and no research result configures Demo orders. The live/manual Demo path is unchanged.
+
+See [the before/after report and all-strategy comparison](research/REBUILD-V2.md). The implementation/protocol were frozen before collecting 20,000 separate public evaluation ticks. None of the candidates qualified; the old selector lost an estimated $226.39 on the new test windows while the rebuilt decision abstained. This is not a claim of profitable trading. Reproduce with `node scripts/evaluate-v2.cjs`; no account or new dependencies are needed. PR #5 is the safe foundation, draft PR #6 is an unapplied execution archive, and the v2 research work is a separate review branch. Nothing should merge/deploy without approval.
+
+## Website restoration release
+
+See [the restoration report](research/WEBSITE-RESTORATION.md) for restored sounds, authorized account display, persistent separate virtual wallets, six educational categories, verification and limitations. Historical PR #7 results remain in [the fixed-protocol report](research/REBUILD-V2.md). The Render build still uses the existing static files and Python backend; no new service or dependency is required.
