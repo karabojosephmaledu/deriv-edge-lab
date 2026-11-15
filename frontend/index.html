@@ -33,7 +33,7 @@
             </svg>
           </span>
           <span class="brand-name">Deriv Edge Lab</span>
-          <span class="badge badge-sim" id="mode-badge" data-testid="mode-badge">Research · virtual money</span>
+          <span class="badge badge-sim" id="mode-badge" data-testid="mode-badge">Accounts · view only</span>
         </div>
         <div class="topbar-actions">
           <button class="btn btn-outline btn-sm" id="sound-toggle" type="button" aria-pressed="true">Sound ON</button>
@@ -47,13 +47,12 @@
     </header>
 
     <main class="shell">
-      <!-- ============ CONNECTED ACCOUNT (view-only) ============ -->
       <section class="card account-card" id="account-card" data-testid="account-card">
         <div class="account-info">
           <div class="card-kicker">Deriv account</div>
           <p class="hint" id="account-auth-status" role="status">Checking account authorization…</p>
           <div id="account-empty">
-            <p class="muted account-copy">Connect your Deriv Demo account. Credentials stay on the secure backend.</p>
+            <p class="muted account-copy">Connect your Deriv account to see genuine Demo or Real balances. Credentials stay on the secure backend.</p>
             <button class="btn btn-primary" id="connect-button" data-testid="connect-button" type="button">Connect with Deriv</button>
           </div>
           <div id="account-live" hidden>
@@ -70,29 +69,23 @@
               <span class="currency" id="balance-currency" data-testid="balance-currency"></span>
               <span class="badge badge-demo" id="account-type" data-testid="account-type">Demo</span>
             </div>
-            <label class="field-label" for="account-select">Authorized Demo account</label>
+            <label class="field-label" for="account-select">Authorized Demo / Real account</label>
             <select class="select select-sm" id="account-select" data-testid="account-select" aria-label="Active account"></select>
             <p class="hint" id="account-balance-status" role="status">Read-only Deriv balance · no virtual profit is added</p>
             <div class="account-meta muted">
               <span id="account-loginid" data-testid="account-loginid"></span>
               <button class="btn btn-ghost btn-sm" id="disconnect-button" data-testid="disconnect-button" type="button">Disconnect</button>
             </div>
-            <details id="linked-accounts" hidden>
-              <summary>Authorized accounts · view only</summary>
-              <div id="linked-accounts-list" class="hint"></div>
-              <p id="linked-accounts-time" class="hint"></p>
-            </details>
           </div>
           <a href="https://home.deriv.com/" target="_blank" rel="noopener noreferrer" class="hint">Open Deriv portal in another tab ↗</a>
           <button class="btn btn-ghost btn-sm" id="account-refresh" type="button">Refresh account status</button>
         </div>
         <div class="shield" data-testid="execution-disabled-note">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          <span id="account-mode-note">Simulation sends no orders · Live accounts blocked</span>
+          <span id="account-mode-note">Account display only · Real accounts view-only</span>
         </div>
       </section>
 
-      <!-- ============ LIVE MARKET ============ -->
       <section class="card telemetry-card" data-testid="market-telemetry-card">
         <div class="telemetry-head">
           <div class="telemetry-market">
@@ -111,223 +104,64 @@
         </div>
       </section>
 
-      <!-- ============ VIRTUAL SIMULATION ============ -->
-      <section class="card" id="virtual-wallet" aria-labelledby="virtual-wallet-title">
-        <div class="card-kicker" id="virtual-wallet-title">Virtual simulation wallet · separate from Deriv</div>
+
+      <section class="card metrics-card" data-testid="session-metrics-card">
+        <div class="card-kicker" id="session-label">Recent settled contracts · genuine Deriv activity</div>
         <div class="metric-grid">
-          <div class="tile"><span class="tile-label">Starting virtual balance</span><span class="tile-value" id="wallet-start">$1,000.00</span></div>
-          <div class="tile"><span class="tile-label">Current virtual balance</span><span class="tile-value" id="wallet-current">$1,000.00</span></div>
-          <div class="tile"><span class="tile-label">Available virtual money</span><span class="tile-value" id="wallet-available">$1,000.00</span></div>
-          <div class="tile"><span class="tile-label">Virtual profit/loss</span><span class="tile-value" id="wallet-profit">$0.00</span></div>
+          <div class="tile"><span class="tile-label">Wins</span><span class="tile-value win" id="stat-wins">—</span></div>
+          <div class="tile"><span class="tile-label">Losses</span><span class="tile-value loss" id="stat-losses">—</span></div>
+          <div class="tile"><span class="tile-label">Win rate</span><span class="tile-value" id="stat-win-rate">—</span></div>
+          <div class="tile"><span class="tile-label">Net P/L</span><span class="tile-value" id="stat-pnl">—</span></div>
         </div>
-        <p class="hint" id="virtual-wallet-note">Simulation results never change the connected Deriv balance.</p>
-        <label class="field-label" for="virtual-start-input">Starting balance for the next virtual session ($)</label>
-        <input class="input" id="virtual-start-input" type="number" min="0.01" max="1000000000" step="0.01" value="1000" />
+        <p class="hint" id="settled-status" role="status">Connect an account to view its recent provider settlements.</p>
+        <p class="hint">Balances change only when Deriv processes genuine account transactions. Choosing an account or viewing research does not place an order.</p>
+        <div class="result-flash" id="result-flash" hidden></div>
+        <div class="sr-only" aria-live="polite" id="result-announcer"></div>
       </section>
-      <div class="grid-main">
-        <section class="card strategy-card" data-testid="strategy-card">
-          <div class="card-kicker" id="trade-type-label">Trade type · virtual</div>
-          <div class="seg seg-3" role="group" aria-label="Strategy" data-testid="product-toggle">
-            <button class="seg-btn" data-testid="product-differs" data-product="differs" type="button" aria-pressed="true">Differs</button>
-            <button class="seg-btn" data-testid="product-accu" data-product="accu" type="button" aria-pressed="false">Accumulator</button>
-            <button class="seg-btn" data-testid="product-mult" data-product="mult" type="button" aria-pressed="false">Multiplier</button>
-          </div>
-          <p class="hint" id="strategy-description" data-testid="strategy-description"></p>
-
-          <div id="accu-options" data-testid="accu-options" hidden>
-            <label class="field-label">Growth per tick</label>
-            <div class="chips">
-              <button class="chip" type="button" data-testid="growth-chip-1" data-growth="0.01">1%</button>
-              <button class="chip" type="button" data-testid="growth-chip-2" data-growth="0.02">2%</button>
-              <button class="chip" type="button" data-testid="growth-chip-3" data-growth="0.03">3%</button>
-              <button class="chip" type="button" data-testid="growth-chip-4" data-growth="0.04">4%</button>
-              <button class="chip" type="button" data-testid="growth-chip-5" data-growth="0.05">5%</button>
-            </div>
-          </div>
-
-          <div id="mult-options" data-testid="mult-options" hidden>
-            <label class="field-label">Direction</label>
-            <div class="seg" role="group" aria-label="Direction">
-              <button class="seg-btn" data-testid="dir-up" data-dir="up" type="button" aria-pressed="true">Up ↑</button>
-              <button class="seg-btn" data-testid="dir-down" data-dir="down" type="button" aria-pressed="false">Down ↓</button>
-            </div>
-            <label class="field-label">Multiplier</label>
-            <div class="chips" id="mult-chips" data-testid="mult-chips"></div>
-          </div>
-
-          <div class="ticket" id="contract-ticket" data-testid="contract-ticket">
-            <div><span class="tk-label">Stake</span><span id="tk-stake" data-testid="ticket-stake">—</span></div>
-            <div><span class="tk-label" id="tk-payout-label">Payout if win</span><span id="tk-payout" data-testid="ticket-payout">—</span></div>
-            <div><span class="tk-label" id="tk-profit-label">Profit if win</span><span class="pl-pos" id="tk-profit" data-testid="ticket-profit">—</span></div>
-            <div><span class="tk-label">Max loss</span><span class="pl-neg" id="tk-loss" data-testid="ticket-loss">—</span></div>
-            <p class="hint tk-note" id="tk-note" data-testid="ticket-note"></p>
-          </div>
-        </section>
-
-        <section class="card matrix-card" data-testid="digit-matrix-card">
-          <div id="digit-section">
-            <div class="card-kicker">Select digit 0–9 · avoid this digit</div>
-            <div class="digit-grid" role="group" aria-label="Digit selection">
-              <button class="digit" type="button" data-testid="digit-button-0" data-digit="0" aria-pressed="false"><span class="digit-num">0</span><span class="digit-pay" data-testid="digit-pay-0" data-digit-pay="0">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-1" data-digit="1" aria-pressed="false"><span class="digit-num">1</span><span class="digit-pay" data-testid="digit-pay-1" data-digit-pay="1">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-2" data-digit="2" aria-pressed="false"><span class="digit-num">2</span><span class="digit-pay" data-testid="digit-pay-2" data-digit-pay="2">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-3" data-digit="3" aria-pressed="false"><span class="digit-num">3</span><span class="digit-pay" data-testid="digit-pay-3" data-digit-pay="3">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-4" data-digit="4" aria-pressed="false"><span class="digit-num">4</span><span class="digit-pay" data-testid="digit-pay-4" data-digit-pay="4">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-5" data-digit="5" aria-pressed="false"><span class="digit-num">5</span><span class="digit-pay" data-testid="digit-pay-5" data-digit-pay="5">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-6" data-digit="6" aria-pressed="false"><span class="digit-num">6</span><span class="digit-pay" data-testid="digit-pay-6" data-digit-pay="6">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-7" data-digit="7" aria-pressed="false"><span class="digit-num">7</span><span class="digit-pay" data-testid="digit-pay-7" data-digit-pay="7">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-8" data-digit="8" aria-pressed="false"><span class="digit-num">8</span><span class="digit-pay" data-testid="digit-pay-8" data-digit-pay="8">—</span></button>
-              <button class="digit" type="button" data-testid="digit-button-9" data-digit="9" aria-pressed="false"><span class="digit-num">9</span><span class="digit-pay" data-testid="digit-pay-9" data-digit-pay="9">—</span></button>
-            </div>
-            <p class="hint digit-explain" id="digit-explain" data-testid="digit-explain"></p>
-          </div>
-
-          <label class="field-label" for="execution-mode">Trading mode</label>
-          <select class="select" id="execution-mode" data-testid="execution-mode">
-            <option value="simulation">Simulation · no orders</option>
-            <option value="demo">Deriv Demo · actual Demo contracts</option>
-          </select>
-          <p class="hint" id="execution-note">Choose Deriv Demo to trade the authorised Demo balance. Live-account execution is blocked.</p>
-          <label class="field-label" for="stake-input">Stake ($)</label>
-          <input class="input" id="stake-input" data-testid="stake-input" type="number" min="0.35" step="0.01" inputmode="decimal" value="1.00" />
-          <div class="risk-row">
-            <div>
-              <label class="field-label" for="target-input">Profit target ($)</label>
-              <input class="input" id="target-input" data-testid="session-target-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Optional" />
-            </div>
-            <div>
-              <label class="field-label" for="maxloss-input">Total loss limit ($)</label>
-              <input class="input" id="maxloss-input" data-testid="session-maxloss-input" type="number" min="0" step="0.5" inputmode="decimal" placeholder="Optional" />
-            </div>
-          </div>
-
-          <div class="run-row">
-            <button class="btn btn-primary btn-lg" id="start-btn" data-testid="start-btn" type="button">Start</button>
-            <button class="btn btn-outline btn-lg" id="pause-btn" data-testid="pause-btn" type="button" disabled>Pause</button>
-            <button class="btn btn-stop btn-lg" id="stop-btn" data-testid="stop-btn" type="button" disabled>Stop</button>
-          </div>
-          <div class="run-indicator" id="running-indicator" data-testid="running-indicator" hidden><span class="pulse-dot"></span><span id="running-text">Running</span></div>
-          <div class="result-flash" id="result-flash" data-testid="result-flash" hidden></div>
-        </section>
-
-        <section class="card metrics-card" data-testid="session-metrics-card">
-          <div class="card-kicker" id="session-label">Session · virtual</div>
-          <div class="metric-grid">
-            <div class="tile"><span class="tile-label">Wins</span><span class="tile-value win" id="stat-wins" data-testid="stat-wins">0</span></div>
-            <div class="tile"><span class="tile-label">Losses</span><span class="tile-value loss" id="stat-losses" data-testid="stat-losses">0</span></div>
-            <div class="tile"><span class="tile-label">Win rate</span><span class="tile-value" id="stat-win-rate" data-testid="stat-win-rate">—</span></div>
-            <div class="tile"><span class="tile-label">Net P/L</span><span class="tile-value" id="stat-pnl" data-testid="stat-pnl">$0.00</span></div>
-          </div>
-          <div class="metric-sub muted">
-            <span id="stat-trades" data-testid="stat-trades">0 trades</span><span>·</span>
-            <span id="stat-dd" data-testid="stat-drawdown">max drawdown $0.00</span>
-          </div>
-          <div class="card-kicker sub">Current contract</div>
-          <div class="last-trade" id="last-trade" data-testid="last-trade">No contract yet.</div>
-          <div class="sr-only" aria-live="polite" id="result-announcer" data-testid="result-announcer"></div>
-        </section>
-      </div>
-
       <div class="grid-bottom">
         <section class="card history-card" data-testid="trade-history-card">
-          <div class="card-kicker"><span id="history-label">Virtual trade history (simulated)</span> <span class="muted" id="history-count" data-testid="history-count"></span></div>
-          <label class="field-label" for="virtual-session-select">Saved virtual session history</label>
-          <select class="select select-sm" id="virtual-session-select"><option value="">Current virtual session</option></select>
-          <div class="table-wrap history-scroll" data-testid="history-scroll">
-            <table class="table" data-testid="trade-history-table">
-              <thead><tr><th>#</th><th>Time</th><th>Contract</th><th>Stake</th><th>P/L</th><th>Result</th></tr></thead>
-              <tbody id="trade-history-body" data-testid="trade-history-body"></tbody>
-            </table>
-            <p class="empty muted" id="trade-history-empty" data-testid="trade-history-empty">No trades yet — press Start.</p>
+          <div class="card-kicker">Account transactions · returned by Deriv</div>
+          <p class="hint" id="transaction-status" role="status">No account selected.</p>
+          <div class="table-wrap history-scroll">
+            <table class="table"><thead><tr><th>Time</th><th>Action / details</th><th>Amount</th><th>Balance after</th><th>Transaction</th></tr></thead><tbody id="account-transactions"></tbody></table>
           </div>
         </section>
-
         <section class="card freq-card" data-testid="digit-frequency-card">
           <div class="card-kicker">Digit frequency · last 100 ticks</div>
           <div class="freq" id="digit-frequency" data-testid="digit-frequency"></div>
         </section>
       </div>
-
-      <!-- ============ OPTIONAL: STRATEGY COMPARISON ============ -->
-      <section class="card" id="educational-research" aria-labelledby="educational-title">
-        <div class="card-kicker" id="educational-title">Educational research · historical virtual scenarios</div>
-        <label class="field-label" for="educational-category">Research category · never an account order</label>
-        <select class="select" id="educational-category">
-          <option value="differs">Digit Differs</option><option value="accu">Accumulator</option><option value="mult">Multiplier</option>
-          <option value="matches">Digit Matches</option><option value="touch">Touch</option><option value="notouch">No Touch</option>
-        </select>
-        <h2 id="educational-name">Digit Differs</h2>
-        <p id="educational-description" class="hint"></p>
-        <p class="hint" id="educational-verdict" role="status">Loading preserved research evidence…</p>
-        <dl class="educational-grid" id="educational-metrics"></dl>
-        <p class="hint" id="educational-limitations"></p>
-        <p class="hint" id="educational-history"></p>
-        <p class="hint">Verdicts: FAILED, INCONCLUSIVE, or SUPPORTED BY EVIDENCE within a stated virtual scenario. No current study qualified. The strict research result remains <strong>NO TRADE</strong>.</p>
-      </section>
-      <details class="card lab-card" id="lab-card" data-testid="lab-card">
-        <summary class="lab-summary" data-testid="lab-toggle">Strategy comparison <span class="muted">(optional · last 1,000 ticks)</span></summary>
-        <div class="lab-body-wrap">
-          <p class="hint">Replays recent ticks with your stake. Auto-digit uses only past ticks (out-of-sample). Past results don't predict future ones.</p>
-          <button class="btn btn-primary" id="lab-run-btn" data-testid="lab-run-btn" type="button">Run comparison</button>
-          <div class="table-wrap" id="lab-output" data-testid="lab-output" hidden>
-            <table class="table" data-testid="lab-table">
-              <thead><tr><th>Strategy</th><th>Trades</th><th>Win rate</th><th>Net P/L</th><th>Max drawdown</th></tr></thead>
-              <tbody id="lab-body"></tbody>
-            </table>
-            <p class="hint" id="lab-note" data-testid="lab-note"></p>
-          </div>
-          <details class="research-panel" id="research-panel">
-            <summary>Virtual strategy and risk study · separate from Demo trading</summary>
-            <p class="hint">Compare contracts using public history and a separate virtual wallet. New signals fill on the following tick. No account orders are sent.</p>
-            <div class="research-fields">
-              <label class="field-label">Virtual balance ($)<input class="input" id="research-balance" type="number" min="0.01" step="0.01" value="10" list="research-balances" /></label>
-              <datalist id="research-balances"><option value="1"><option value="2.5"><option value="5"><option value="8"><option value="10"><option value="1000"></datalist>
-              <label class="field-label">Base stake ($)<input class="input" id="research-stake" type="number" min="0.35" step="0.01" value="0.35" /></label>
-              <label class="field-label">Session profit target ($)<input class="input" id="research-target" type="number" min="0.01" step="0.01" placeholder="Optional" /></label>
-              <label class="field-label">Session loss limit ($)<input class="input" id="research-loss" type="number" min="0.01" step="0.01" placeholder="Optional" /></label>
-            </div>
-            <p class="hint">Contract floors: $0.35 for the binary studies, $1 for Accumulators/Multipliers. Unavailable proposals are skipped; lower balances never create credit or a smaller fictional contract. These floors are conservative research limits; provider availability and limits may change.</p>
-            <button class="btn btn-primary" id="research-run" type="button">Compare virtual strategies</button>
-            <p class="hint" id="research-status" role="status" aria-live="polite"></p>
-            <div class="table-wrap" id="research-output" hidden>
-              <p class="hint" id="research-decision" role="status" aria-live="polite"></p>
-              <table class="table"><caption>Held-out results · estimates, not actual account trades</caption>
-                <thead><tr><th>Strategy</th><th>Trades / wins</th><th>Net P/L</th><th>Avg win / loss</th><th>Break-even wins</th><th>Max drawdown</th><th>Longest losses</th><th>Status</th></tr></thead>
-                <tbody id="research-body"></tbody>
-              </table>
-              <p class="hint" id="research-selection"></p>
-              <table class="table"><caption>Qualified research candidate only · empty for NO TRADE</caption>
-                <thead><tr><th>Staking model</th><th>Trades</th><th>Net P/L</th><th>Max drawdown</th><th>Available balance</th><th>Status</th></tr></thead>
-                <tbody id="research-staking"></tbody>
-              </table>
-              <details><summary>Unselected fixed-Differs staking benchmarks · risk examples only</summary>
-                <table class="table"><caption>Original reference, not a fallback recommendation</caption>
-                  <thead><tr><th>Model</th><th>Trades</th><th>Net P/L</th><th>Max drawdown</th><th>Available balance</th><th>Status</th></tr></thead>
-                  <tbody id="research-benchmark-staking"></tbody>
-                </table>
-              </details>
-              <p class="hint" id="research-caveat"></p>
-            </div>
-          </details>
-        </div>
+      <details class="card lab-card" id="matches-research">
+        <summary class="lab-summary">Digit Matches research <span class="muted">· historical scenarios only</span></summary>
+        <h2>Digit Matches</h2>
+        <p class="hint">Wins only when the final digit matches the chosen digit. Under independent uniform digits, each digit has a theoretical 10% chance. Historical frequencies do not establish a prediction.</p>
+        <p class="hint" id="matches-verdict" role="status">Loading preserved evidence…</p>
+        <dl class="educational-grid" id="matches-metrics"></dl>
+        <p class="hint">NO TRADE: no tested strategy qualified. This research cannot change your account, choose a broker trade, or start an order. Saved public payouts are scenario assumptions, not current executable quotes.</p>
+        <p class="hint" id="matches-limitations"></p>
       </details>
-
-      <footer class="disclaimer" id="mode-disclaimer" data-testid="disclaimer">
-        Virtual-money simulation on live Deriv data. No real trades are placed. Not financial advice.
-      </footer>
+      <details class="card lab-card" id="saved-research">
+        <summary class="lab-summary">Saved research history <span class="muted">· virtual records, separate from Deriv</span></summary>
+        <p class="hint">Previous local research records remain available here. Their results are not provider transactions and never change the balance above.</p>
+        <label class="field-label" for="saved-session-select">Previous research session</label>
+        <select class="select select-sm" id="saved-session-select"></select>
+        <p class="hint" id="saved-research-stats"></p>
+        <div class="table-wrap history-scroll"><table class="table"><thead><tr><th>Time</th><th>Historical contract</th><th>Virtual P/L</th><th>Outcome</th></tr></thead><tbody id="saved-research-rows"></tbody></table></div>
+      </details>
+      <footer class="disclaimer">Genuine Deriv account information above. Real accounts are view-only. Digit Matches research is separate and sends no orders.</footer>
     </main>
-
     <dialog class="dialog" id="connect-dialog" data-testid="deriv-account-modal" aria-labelledby="connect-title">
       <div class="dialog-inner">
         <div class="dialog-head">
-          <h2 id="connect-title">Connect Demo Account</h2>
-          <p class="dialog-sub">Official login returns you here. Connecting alone sends no orders; only explicit Demo mode and Start can submit Demo contracts. Real-money trading is blocked.</p>
+          <h2 id="connect-title">Connect Deriv Account</h2>
+          <p class="dialog-sub">Official login returns you here. This account dashboard reads balances and history; it does not start trades. Real accounts stay view-only.</p>
         </div>
         <div class="oauth-block" id="oauth-block" hidden>
-          <button class="btn btn-primary btn-block" id="oauth-connect-button" data-testid="oauth-connect-button" type="button">Connect Demo Account with Deriv</button>
+          <button class="btn btn-primary btn-block" id="oauth-connect-button" data-testid="oauth-connect-button" type="button">Connect Deriv Account with Deriv</button>
           <p class="hint">Sign in securely on Deriv and return to your dashboard.</p>
         </div>
         <p class="hint" id="connect-status" role="status">No authorized account connected.</p>
+        <p class="form-error" id="connect-error" data-testid="connect-error" hidden></p>
         <details id="token-details"><summary>Alternative: connect with a private API token</summary>
         <form id="token-form" novalidate>
           <label class="field-label" for="token-input">API token</label>
@@ -337,7 +171,6 @@
             using the permissions required by Deriv's account API (currently <strong>trade</strong> for listing Options accounts).
             Tokens stay in backend memory, not browser storage. Never share a token in chat.
           </p>
-          <p class="form-error" id="connect-error" data-testid="connect-error" hidden></p>
           <div class="dialog-actions">
             <button class="btn btn-primary" type="submit" id="token-connect-button" data-testid="token-connect-button">Connect</button>
           </div>
@@ -348,7 +181,6 @@
     </dialog>
 
     <div class="toast-container" id="toast-container" data-testid="toast-container" aria-live="polite"></div>
-    <script src="/research.js" defer></script>
-    <script src="/app.js" defer></script>
+    <script src="/account.js" defer></script>
   </body>
 </html>

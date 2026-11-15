@@ -23,7 +23,7 @@ before(async () => {
     const file = files[req.url];
     if (!file) { res.writeHead(404).end(); return; }
     res.setHeader("Content-Type", file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" : file.endsWith(".svg") ? "image/svg+xml" : "text/html");
-    res.end(readFileSync(resolve(frontend, file)));
+    res.end(readFileSync(req.url === "/" ? resolve(__dirname, "fixtures/legacy-dashboard.html") : resolve(frontend, file)));
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   origin = `http://127.0.0.1:${server.address().port}`;

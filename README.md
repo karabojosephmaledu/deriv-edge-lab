@@ -1,22 +1,29 @@
 # Deriv Edge Lab
 
-A research dashboard for Deriv Volatility indices:
+An account-centered dashboard for Deriv Options accounts, with live public market data and separate historical Digit Matches research.
 
-- **Research simulation:** real Deriv ticks with **virtual money** for Digit Differs, Accumulators and Multipliers. No Deriv contracts are placed.
-- **Deriv Demo execution (explicit opt-in):** Login with Deriv (OAuth + PKCE) or enter a token privately in the connection form. The backend verifies active USD Demo accounts, holds credentials in memory, and places actual Demo contracts only after Start Demo trading. Live accounts and live WebSocket endpoints are blocked.
-- **Strategy comparison (optional, collapsible):** replays the last 1,000 real ticks through each strategy, including past-only evaluation of the auto-digit rule against random digits. These short comparisons do not establish profitability.
-- **No AI services:** all analysis is plain math/statistics in `app.js`. No paid API keys or Emergent credits are needed.
+- Genuine authorized Demo and Real balances, currency and recent transactions; Real accounts are view-only.
+- Original dark-blue styling, public ticks, last ten digits, digit frequency and WIN/LOSS notification sounds.
+- Digit Matches historical research and previous local research records stay separate from account information. No replacement virtual-wallet card.
+- Existing Demo execution and simulation code is retained unchanged for preservation/regression checks. The current account-display page does not load that entry point or start orders.
+- No paid AI services, new dependency or Emergent credits are required.
+
+## Current account-centered website
+
+The deployed page focuses on genuine authorized Demo/Real account balances and read-only provider activity. Digit Matches is the only visible research category; it never starts orders. The large virtual wallet and other strategy controls are removed from the current interface. Original execution/simulation source remains preserved separately and is not activated by this page. See [the account-experience investigation](research/ACCOUNT-EXPERIENCE.md) for the confirmed cause, source-preservation boundary, supported data and limitations.
 
 ## Structure
 
 ```
 frontend/index.html          markup (the app)
 frontend/public/styles.css   styling
-frontend/public/app.js       dashboard and research simulator (vanilla JS)
+frontend/public/account.js   current account display + public market data
+frontend/public/app.js       preserved legacy Demo/simulation entry point
 frontend/public/research.js  isolated virtual wallet and strategy studies
 frontend/public/favicon.svg  logo
 backend/server.py            FastAPI app, every route under /api
-backend/routers/deriv.py     OAuth/session and CSRF-protected Demo APIs
+backend/routers/deriv.py     preserved OAuth/session and Demo APIs
+backend/routers/account_display.py  authorized read-only balances/history
 backend/lib/deriv_demo.py    authenticated Demo sockets, execution and order ledger
 render.yaml                  Render blueprint
 env.example                  configuration template (no credentials)

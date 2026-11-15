@@ -919,3 +919,8 @@ button { font-family: inherit; }
   .topbar-actions { width: 100%; justify-content: flex-end; }
   .topbar-actions .btn { white-space: nowrap; }
 }
+
+/* Existing account cards and tables, with long provider descriptions contained. */
+.table td.transaction-description { white-space: normal; min-width: 170px; max-width: 320px; overflow-wrap: anywhere; }
+#matches-research[open], #saved-research[open] { display: grid; gap: 12px; }
+#saved-research .table-wrap { max-width: 100%; }

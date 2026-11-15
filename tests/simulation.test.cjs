@@ -12,7 +12,7 @@ const vm = require("node:vm");
 
 const root = resolve(__dirname, "..");
 const source = readFileSync(process.env.SIMULATION_APP_SOURCE || resolve(root, "frontend/public/app.js"), "utf8");
-const html = readFileSync(resolve(root, "frontend/index.html"), "utf8");
+const html = readFileSync(resolve(root, "tests/fixtures/legacy-dashboard.html"), "utf8");
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 function harness(script = source) {

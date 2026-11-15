@@ -131,7 +131,7 @@ test("the actual Render static build preserves dashboard assets and routes to th
   t.after(() => rmSync(temp, { recursive: true, force: true }));
   cpSync(join(root, "frontend"), join(temp, "frontend"), { recursive: true, filter: (p) => !p.includes("node_modules") });
   execFileSync("sh", ["-c", build], { cwd: temp });
-  for (const [input, output] of [["public/research-evidence.json", "research-evidence.json"], ["index.html", "index.html"], ["public/app.js", "app.js"], ["public/styles.css", "styles.css"], ["public/favicon.svg", "favicon.svg"]]) {
+  for (const [input, output] of [["public/account.js", "account.js"], ["public/research-evidence.json", "research-evidence.json"], ["index.html", "index.html"], ["public/app.js", "app.js"], ["public/styles.css", "styles.css"], ["public/favicon.svg", "favicon.svg"]]) {
     assert.deepEqual(readFileSync(join(temp, publish, output)), readFileSync(join(root, "frontend", input)));
   }
   assert.equal(destination.replace("*", "deriv/config"), "https://deriv-edge-lab-2oux.onrender.com/api/deriv/config");
