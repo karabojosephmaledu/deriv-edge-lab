@@ -33,7 +33,7 @@
             </svg>
           </span>
           <span class="brand-name">Deriv Edge Lab</span>
-          <span class="badge badge-sim" data-testid="mode-badge">Research · virtual money</span>
+          <span class="badge badge-sim" id="mode-badge" data-testid="mode-badge">Research · virtual money</span>
         </div>
         <div class="topbar-actions">
           <span class="status-pill" id="connection-status" data-testid="connection-status" role="status">
@@ -51,7 +51,7 @@
         <div class="account-info">
           <div class="card-kicker">Deriv account</div>
           <div id="account-empty">
-            <p class="muted account-copy">Connect to view your Demo or Real balance. Your token stays in this browser tab.</p>
+            <p class="muted account-copy">Connect your Deriv Demo account. Credentials stay on the secure backend.</p>
             <button class="btn btn-primary" id="connect-button" data-testid="connect-button" type="button">Connect account</button>
           </div>
           <div id="account-live" hidden>
@@ -77,7 +77,7 @@
         </div>
         <div class="shield" data-testid="execution-disabled-note">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          <span>View-only · no orders are sent</span>
+          <span id="account-mode-note">Simulation sends no orders · Live accounts blocked</span>
         </div>
       </section>
 
@@ -103,7 +103,7 @@
       <!-- ============ VIRTUAL SIMULATION ============ -->
       <div class="grid-main">
         <section class="card strategy-card" data-testid="strategy-card">
-          <div class="card-kicker">Trade type · virtual</div>
+          <div class="card-kicker" id="trade-type-label">Trade type · virtual</div>
           <div class="seg seg-3" role="group" aria-label="Strategy" data-testid="product-toggle">
             <button class="seg-btn" data-testid="product-differs" data-product="differs" type="button" aria-pressed="true">Differs</button>
             <button class="seg-btn" data-testid="product-accu" data-product="accu" type="button" aria-pressed="false">Accumulator</button>
@@ -159,6 +159,12 @@
             <p class="hint digit-explain" id="digit-explain" data-testid="digit-explain"></p>
           </div>
 
+          <label class="field-label" for="execution-mode">Trading mode</label>
+          <select class="select" id="execution-mode" data-testid="execution-mode">
+            <option value="simulation">Simulation · no orders</option>
+            <option value="demo">Deriv Demo · actual Demo contracts</option>
+          </select>
+          <p class="hint" id="execution-note">Choose Deriv Demo to trade the authorised Demo balance. Live-account execution is blocked.</p>
           <label class="field-label" for="stake-input">Stake ($)</label>
           <input class="input" id="stake-input" data-testid="stake-input" type="number" min="0.35" step="0.01" inputmode="decimal" value="1.00" />
           <div class="risk-row">
@@ -182,7 +188,7 @@
         </section>
 
         <section class="card metrics-card" data-testid="session-metrics-card">
-          <div class="card-kicker">Session · virtual</div>
+          <div class="card-kicker" id="session-label">Session · virtual</div>
           <div class="metric-grid">
             <div class="tile"><span class="tile-label">Wins</span><span class="tile-value win" id="stat-wins" data-testid="stat-wins">0</span></div>
             <div class="tile"><span class="tile-label">Losses</span><span class="tile-value loss" id="stat-losses" data-testid="stat-losses">0</span></div>
@@ -201,7 +207,7 @@
 
       <div class="grid-bottom">
         <section class="card history-card" data-testid="trade-history-card">
-          <div class="card-kicker">Virtual trade history (simulated) <span class="muted" id="history-count" data-testid="history-count"></span></div>
+          <div class="card-kicker"><span id="history-label">Virtual trade history (simulated)</span> <span class="muted" id="history-count" data-testid="history-count"></span></div>
           <div class="table-wrap history-scroll" data-testid="history-scroll">
             <table class="table" data-testid="trade-history-table">
               <thead><tr><th>#</th><th>Time</th><th>Contract</th><th>Stake</th><th>P/L</th><th>Result</th></tr></thead>
@@ -233,7 +239,7 @@
         </div>
       </details>
 
-      <footer class="disclaimer" data-testid="disclaimer">
+      <footer class="disclaimer" id="mode-disclaimer" data-testid="disclaimer">
         Virtual-money simulation on live Deriv data. No real trades are placed. Not financial advice.
       </footer>
     </main>
