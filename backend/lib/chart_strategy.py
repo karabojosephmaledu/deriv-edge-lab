@@ -6,6 +6,9 @@ import io
 import json
 import math
 import os
+import re
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 import shutil
 import time
@@ -13,7 +16,24 @@ import time
 from lib.deriv_demo import DemoError, amount
 
 FRAMES = {86400: "D1", 14400: "H4", 3600: "H1", 900: "M15"}
-WORKER = Path(__file__).resolve().parents[2] / "chartscanner/recovery/worker.ts"
+WORKER = Path(__file__).resolve().parents[1] / "chartscanner/recovery/worker.ts"
+
+
+@lru_cache(maxsize=4)
+def node_version(executable):
+    try:
+        result=subprocess.run([executable,"--version"],capture_output=True,text=True,check=True,timeout=2)
+        version=result.stdout.strip()
+        return version if re.fullmatch(r"v\d+\.\d+\.\d+",version) else None
+    except (OSError,subprocess.SubprocessError):
+        return None
+
+
+def runtime_status():
+    executable=shutil.which("node")
+    version=node_version(executable) if executable else None
+    return {"node_available":bool(version and version.split(".")[0]=="v24"),
+        "node_version":version,"worker_available":WORKER.is_file()}
 
 
 def finite(value):
@@ -77,7 +97,8 @@ def render_chart(symbol, granularity, bars):
 
 async def scan(symbol, frames, prior=None):
     node = shutil.which("node")
-    if not node or not WORKER.exists() or not any(os.environ.get(f"CHART_AI_SLOT_{i}_API_KEY") for i in range(1,7)):
+    ready=runtime_status()
+    if not ready["node_available"] or not ready["worker_available"] or not any(os.environ.get(f"CHART_AI_SLOT_{i}_API_KEY") for i in range(1,7)):
         raise DemoError("Configure the server's AI vision slots and Node 24 before automatic analysis.", 503)
     context = {"product":"Deriv Options Multipliers", "symbol":symbol,
         "closed_candles":{str(g):bars for g,bars in frames.items()},

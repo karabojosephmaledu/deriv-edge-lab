@@ -17,7 +17,7 @@ before(async()=>{
   const send=(code,data)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store, private'});res.end(JSON.stringify(data));};
   if(url.pathname.startsWith('/api/deriv/')){
    model.calls.push({path:url.pathname,method:req.method,body,selected:url.searchParams.get('account_id')});
-   if(url.pathname==='/api/deriv/chart/config')return send(200,{enabled:model.chartEnabled,demo_enabled:true,real_enabled:true,ai_configured:true,node_available:true});
+   if(url.pathname==='/api/deriv/chart/config')return send(200,{enabled:model.chartEnabled,demo_enabled:true,real_enabled:true,ai_configured:true,node_available:true,worker_available:!model.workerMissing});
    if(url.pathname.startsWith('/api/deriv/chart/')) {
     if(!model.connected)return send(401,{detail:'Sign in'});
     if(req.method==='POST' && req.headers['x-deriv-csrf']!=='mock-csrf')return send(403,{detail:'CSRF failed'});
@@ -119,4 +119,11 @@ test('disabled server flag preserves the working existing page without automatic
  const page=await open(t,{enabled:false});assert.equal(await page.locator('#chart-testing').count(),0);
  assert.equal(await page.locator('#matches-testing').isVisible(),true);
  assert.equal(model.calls.some(c=>c.path.endsWith('/chart/start')),false);
+});
+
+test('a missing server worker cannot display a ready Start button',{timeout:15000},async t=>{
+ const page=await open(t);model.workerMissing=true;
+ await page.reload();await page.waitForFunction(()=>state.auth==='authorised'&&!state.checking);
+ await page.waitForFunction(()=>document.getElementById('chart-status')?.textContent.includes('scanner is missing'));
+ assert.equal(await page.locator('#chart-start').isDisabled(),true);assert.equal(model.run,null);
 });

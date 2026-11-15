@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyScanPolicy, confidenceScore } from '../src/lib/scan-policy.server.ts';
-import { STRATEGY_LIBRARY } from '../src/lib/strategy-library.server.ts';
-import { buildStrategyCorpus, SYSTEM_PROMPT } from '../src/lib/analyzer-prompt.server.ts';
+import { applyScanPolicy, confidenceScore } from '../../backend/chartscanner/src/lib/scan-policy.server.ts';
+import { STRATEGY_LIBRARY } from '../../backend/chartscanner/src/lib/strategy-library.server.ts';
+import { buildStrategyCorpus, SYSTEM_PROMPT } from '../../backend/chartscanner/src/lib/analyzer-prompt.server.ts';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { runChartScan } from '../src/lib/scan-engine.server.ts';
-import { createVisionProbe } from '../src/lib/vision-slots.server.ts';
+import { runChartScan } from '../../backend/chartscanner/src/lib/scan-engine.server.ts';
+import { createVisionProbe } from '../../backend/chartscanner/src/lib/vision-slots.server.ts';
 
 function fixture(n=8, votes=3) {
  const ids=['structure-first','carlfx-blueprint','candle-range-theory'];

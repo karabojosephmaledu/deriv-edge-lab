@@ -22,13 +22,13 @@
     const real=account?.type==="real";
     const enabled=Boolean(account && cfg[account.type+"_enabled"] && state.auth==="authorised");
     el("chart-live-choice").hidden=!real;
-    el("chart-start").disabled=busy || active || !enabled || !cfg.ai_configured || !cfg.node_available || real && !el("chart-live-confirm").checked;
+    el("chart-start").disabled=busy || active || !enabled || !cfg.ai_configured || !cfg.node_available || !cfg.worker_available || real && !el("chart-live-confirm").checked;
     el("chart-pause").disabled=busy || !run || !["running","paused"].includes(run.status);
     el("chart-pause").textContent=run?.status==="paused"?"Resume":"Pause";
     el("chart-stop").disabled=busy || !run || !["running","paused"].includes(run.status);
     for(const id of ["chart-stake","chart-target","chart-loss","chart-live-confirm","symbol-select","account-select"])el(id).disabled=Boolean(active || busy);
     text("chart-mode",run && active ? (run.mode==="real"?"LIVE money":"Genuine Demo contracts") : real?"Live account selected":"Demo account selected");
-    text("chart-status",run?.error || run?.note || (!account?"Connect your Deriv account first.":!enabled?"Automatic execution is disabled for this account type.":!cfg.ai_configured || !cfg.node_available?"Server setup is incomplete. AI vision slots and Node 24 are required.":"Ready. Start will check the original chart rules before any entry."));
+    text("chart-status",run?.error || run?.note || (!account?"Connect your Deriv account first.":!enabled?"Automatic execution is disabled for this account type.":!cfg.worker_available?"The backend scanner is missing. Complete the backend deployment first.":!cfg.ai_configured || !cfg.node_available?"Server setup is incomplete. AI vision slots and Node 24 are required.":"Ready. Start will check the original chart rules before any entry."));
     text("chart-wins",String(run?.wins || 0));text("chart-losses",String(run?.losses || 0));
     text("chart-rate",run?.settled?(100*run.win_rate).toFixed(1)+"%":"—");text("chart-pnl",money(run?.net || 0));
     el("chart-pnl").className="tile-value "+((run?.net || 0)>0?"win":(run?.net || 0)<0?"loss":"");

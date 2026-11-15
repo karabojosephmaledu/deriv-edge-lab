@@ -1,6 +1,6 @@
 # Personal original-strategy Deriv worker
 
-The existing website and production hosting have not been replaced or deployed by this branch. The optional runtime uses the recovered EazyXPro analyzer with native Node 24 and the existing Python backend. There is no new subscription, platform account, frontend secret or Node package install.
+The optional runtime uses the recovered EazyXPro analyzer with native Node 24 and the existing Python backend. PR #14 was merged with execution disabled. The follow-up packaging fix keeps the worker inside `backend/chartscanner/`, so Render's existing Python service with `rootDir: backend` can include it. There is no new subscription, service URL, frontend secret or Node package install.
 
 ## Backend configuration after review
 
@@ -20,9 +20,9 @@ Keys authorize AI analysis; existing OAuth authorizes the selected Deriv account
 
 ## Runtime / Render preparation
 
-The existing Python-only Render runtime does not guarantee Node 24. `Dockerfile.chartscanner` supplies Python 3.12, Node 24 and Pillow, keeping uvicorn bound to `$PORT`. It was built and HTTP-smoke-tested locally. Build from the repository root with this Dockerfile, **not** a `backend/`-only Docker context, so the worker is included. The default Docker start command is provided. A managed review environment required a build-only CA bundle; the optional BuildKit `build_ca` secret supports that without disabling TLS or embedding a certificate. Ordinary Render builds do not need this secret.
+Render excludes files outside a service's root directory. The original repository-root scanner layout therefore did not fit the existing backend-root Python deployment. The worker and all runtime modules now live under `backend/chartscanner/`. A backend-only isolated-copy test imports it without repository siblings. Keep the existing Root Directory `backend`, build `pip install -r requirements.txt`, and start `uvicorn server:app --host 0.0.0.0 --port $PORT --workers 1`. `backend/.node-version` pins Node 24.22.1; the worker's package also bounds its supported major to 24. The config endpoint now reports the actual `node_version`, strict Node 24 readiness and `worker_available` instead of assuming any executable named node is adequate. If Render has a conflicting `NODE_VERSION` environment override, update that setting to `24.22.1`.
 
-No Render service, paid plan, build setting, secret or feature flag was changed. Changing the current Python service to this runtime is a separate hosting action; preserve its URL, environment and frontend rewrite. Do not deploy the frontend alone and enable it against an old backend. Keep automatic and Live flags off until the matching backend is installed, configuration is verified and the Demo flow has been reviewed.
+The Dockerfile remains an optional verified alternative, supplying Python 3.12 and Node 24 while keeping uvicorn bound to `$PORT`. It copies the same bundled backend and does not require a second scanner directory. A managed Docker review build used an optional build-only CA bundle without disabling TLS. Switching Render to Docker is not required for the current native Python service. Preserve its URL, environment and frontend rewrite. Live stays disabled; enabling Demo remains an explicit environment change after runtime checks. No saved secret values were read.
 
 The frontend Static Site still uses its existing build command:
 
@@ -36,7 +36,7 @@ Render Free can sleep/restart; account sessions expire and server-side tokens ar
 
 ## Tests and evidence
 
-Full available existing/new run: 126 backend tests + 215 JavaScript/browser tests passed. Final targeted checks add two durable-intent cancellation cases, three actual-scanner integration cases and malformed-provider-output fallback, for **347 distinct passing tests** in the final tree (128 Python + 219 JavaScript/browser). Targeted final runs also repeat the changed browser and scanner suites. TypeScript checking of the native worker and its imports passed. Docker build and offline worker/HTTP startup smoke checks passed with execution disabled. Provider/AI responses in automated tests are controlled data; no test places authenticated broker orders.
+PR #14 verification covered **347 distinct passing tests** (128 Python + 219 JavaScript/browser), using the full available suite followed by targeted final checks. The Render packaging follow-up passed **106 targeted tests** (57 Python + 49 JavaScript/browser), including six new Node-version/backend-only packaging cases and a missing-worker browser case. Native worker TypeScript checking passed again. Original strategy and provider source modules are unchanged by the move. The earlier Docker build and offline worker/HTTP startup smoke checks passed with execution disabled. Provider/AI responses in automated tests are controlled data; no test places authenticated broker orders.
 
 ```sh
 node --test tests/*.test.cjs chartscanner/tests/*.test.mjs

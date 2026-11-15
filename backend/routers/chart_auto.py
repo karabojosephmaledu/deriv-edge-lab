@@ -10,7 +10,6 @@ import contextlib
 import json
 import os
 import secrets
-import shutil
 import time
 from dataclasses import dataclass, field
 from urllib.parse import quote, urlsplit, parse_qs
@@ -22,7 +21,7 @@ from pymongo.errors import DuplicateKeyError
 from websockets.asyncio.client import connect
 
 from lib.deriv_demo import Channel, DemoError, DemoRejected, SYMBOLS, amount, INSTANCE
-from lib.chart_strategy import FRAMES, closed_candles, scan, price_plan, quote_limits, verify_final_quote, finite
+from lib.chart_strategy import FRAMES, closed_candles, scan, price_plan, quote_limits, verify_final_quote, finite, runtime_status
 from routers import deriv
 
 router=APIRouter()
@@ -34,7 +33,7 @@ def flags():
         "demo_enabled":enabled and os.environ.get("DERIV_DEMO_TRADING_ENABLED","").lower()=="true",
         "real_enabled":enabled and os.environ.get("DERIV_LIVE_TRADING_ENABLED","").lower()=="true",
         "ai_configured":any(os.environ.get(f"CHART_AI_SLOT_{n}_API_KEY") for n in range(1,7)),
-        "node_available":bool(shutil.which("node")), "product":"Options Multipliers"}
+        **runtime_status(), "product":"Options Multipliers"}
 
 
 class AutoConfig(BaseModel):
@@ -62,8 +61,8 @@ def require_enabled(cfg):
     f=flags()
     if not f["enabled"] or not f[cfg.mode+"_enabled"]:
         raise DemoError("Automatic "+cfg.mode+" execution is disabled on the backend.",403)
-    if not f["ai_configured"] or not f["node_available"]:
-        raise DemoError("Configure server-side vision slots and Node 24 before starting.",503)
+    if not f["ai_configured"] or not f["node_available"] or not f["worker_available"]:
+        raise DemoError("Configure server-side vision slots, Node 24 and the bundled scanner before starting.",503)
 
 
 def execution_url(url, kind):
