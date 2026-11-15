@@ -1,4 +1,4 @@
-# Deriv Edge Lab backend — runtime (no paid AI / Emergent-only packages)
+# Deriv Edge Lab backend — runtime (no Emergent-only packages)
 fastapi==0.141.1
 uvicorn==0.52.1
 python-dotenv>=1.0.1
@@ -8,6 +8,8 @@ motor==3.7.1
 httpx>=0.27.0
 websockets==16.0
 tzdata>=2024.2
+# Server-rendered authentic candlestick images for the recovered ChartScanner.
+Pillow>=11,<13
 # tests only
 pytest>=8.0.0
 pytest-xdist>=3.6.0
