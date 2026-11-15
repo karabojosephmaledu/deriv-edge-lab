@@ -60,3 +60,24 @@ With no backend at all (for example on CodePen), the dashboard still runs. Live 
 - Controls: Stake, Profit target, Total loss limit, Start/Pause/Stop. A contract is never opened if its full-stake loss would push the session past the loss limit. Background cap: 1,000 trades per session. A single contract's loss is always at most the stake.
 
 Accumulator and Multiplier results are close approximations of Deriv's settlement. Nothing here predicts the next tick. Every contract type has a house edge. Not financial advice.
+
+## Simulation integrity and regression checks
+
+- Stop lets an open contract finish in its original session. New session stays disabled until then. Pause/Resume preserves that session; reaching a profit/loss limit while paused stops it.
+- Market selection is locked while a contract is open. A disconnect or missing tick stops research and records an open position as **Unresolved / P/L unknown**, rather than inventing a settlement or silently deleting it. Settled P/L excludes unknown results and the session is labelled incomplete.
+- The labelled synthetic fallback is display only. Start needs a verified live tick; generated ticks never enter research statistics or settle contracts. Duplicate, out-of-order, invalid and wrong-market ticks are rejected before they affect research.
+- Maximum equity drawdown includes observed open-position P/L (including Multiplier entry commission). Zero-profit settlements are break-even, not losses. Comparison statistics use the same accounting and identify any still-open final position as unresolved. Entry rules, payouts and settlement formulas are unchanged.
+
+From the repository root, run the deterministic tests with Node.js (no packages, tokens, backend or database needed):
+
+```bash
+node --test tests/simulation.test.cjs
+```
+
+Browser checks use Playwright and Chromium, with all Deriv sockets mocked:
+
+```bash
+node --test tests/simulation-browser.test.cjs
+```
+
+If Chromium is already installed outside Playwright's usual location, set `CHROMIUM_PATH` to its executable. These tests check software correctness, not profitability or live OAuth connectivity.
