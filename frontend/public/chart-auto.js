@@ -95,7 +95,11 @@
     const current=marketRows.find(m=>m.symbol===run?.symbol);
     text("chart-current-market",marketError || (run?"Current market: "+(current?.name || run.symbol):marketsReady?"Select the markets above; the bot checks only your selection.":"Loading verified Deriv markets…"));
     const statuses=el("chart-market-results");statuses.textContent="";
-    for(const market of run?.markets || []){const item=document.createElement("li");item.textContent=(market.name || market.symbol)+" · "+market.verdict+" · "+market.note;statuses.append(item);}
+    for(const market of run?.markets || []){
+      const item=document.createElement("li");
+      const closes=(market.rule_checks || []).filter(c=>c.reason==='waiting_for_source_close').map(c=>c.timeframe+" close "+when(c.next_source_close));
+      item.textContent=(market.name || market.symbol)+" · "+market.verdict+" · "+market.note+(closes.length?" · "+closes.join(" / "):"");statuses.append(item);
+    }
     if(active && run.symbol && el("symbol-select").value!==run.symbol && [...el("symbol-select").options].some(o=>o.value===run.symbol)) {
       el("symbol-select").value=run.symbol;if(typeof subscribeMarket==="function")void subscribeMarket();
     }

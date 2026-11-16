@@ -208,6 +208,16 @@ test('server-selected rotation updates the displayed real market without submitt
  assert.equal(model.calls.filter(c=>c.path.endsWith('/chart/start')).length,1);
 });
 
+test('market checks explain missing rules and show source-close times without placing orders',{timeout:15000},async t=>{
+ const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);
+ await page.locator('#chart-start').click();await page.waitForFunction(()=>document.getElementById('chart-pause').disabled===false);
+ model.run.markets=[{symbol:'R_100',name:'Volatility 100',verdict:'WAIT',note:'WAIT — the required raid and close-back are missing.',rule_checks:[{timeframe:'M15',reason:'raid_and_close_back_missing'},{timeframe:'H1',reason:'waiting_for_source_close',next_source_close:Math.floor(Date.now()/3600000)*3600+3600}]}];
+ await page.waitForFunction(()=>document.getElementById('chart-market-results').textContent.includes('H1 close'));
+ assert.match(await page.locator('#chart-market-results').textContent(),/Volatility 100.*raid and close-back.*H1 close/);
+ assert.equal(model.run.pending,null);assert.equal(model.run.history.length,0);
+ assert.equal(model.calls.filter(c=>c.path.endsWith('/chart/start')).length,1);
+});
+
 test('a waking backend retries Demo controls instead of silently presenting working practice',{timeout:20000},async t=>{
  const page=await open(t,{configFailures:2});
  await page.waitForSelector('#chart-availability');

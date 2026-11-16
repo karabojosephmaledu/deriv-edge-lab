@@ -28,6 +28,25 @@ test('the documented mirrored reversal can produce a SELL interpretation',()=>{
  const data=fixture();for(const bars of Object.values(data))for(const b of bars){const h=b.high,l=b.low;b.open=200-b.open;b.close=200-b.close;b.high=200-l;b.low=200-h;}
  const result=localScan('frxXAUUSD',data);assert.equal(result.verdict,'SELL_NOW');assert.equal(result.multiplier_plan.direction,'SELL');
 });
+test('a range can test through the prior-day level without exact OHLC equality',()=>{
+ const data=fixture();data[900].at(-5).low=98.995;
+ assert.equal(localScan('R_100',data).verdict,'BUY_NOW');
+ for(const bars of Object.values(data))for(const b of bars){const h=b.high,l=b.low;b.open=200-b.open;b.close=200-b.close;b.high=200-l;b.low=200-h;}
+ assert.equal(localScan('R_100',data).verdict,'SELL_NOW');
+});
+test('between source closes the wait reason reports the real source timeframe and future close',()=>{
+ const data=fixture();data[60].at(-1).epoch+=60;
+ const result=localScan('R_100',data);
+ assert.match(result.wait_summary,/M15\/H1 closes/);
+ assert.ok(result.local_diagnostics.every(d=>d.reason==='waiting_for_source_close'));
+ assert.ok(result.local_diagnostics.every(d=>d.next_source_close>data[60].at(-1).epoch+60));
+});
+test('eligible source closes identify the actual missing condition',()=>{
+ const data=fixture();data[900].at(-5).low=99.01;data[900].at(-5).high=104.99;
+ const result=localScan('R_100',data);
+ assert.equal(result.local_diagnostics[0].reason,'prior_day_level_not_tested');
+ assert.match(result.wait_summary,/prior-day level has not been tested/);
+});
 test('a missing raid close-back or missing opposite confirmation never forces an entry',()=>{
  for(const change of ['no_raid','no_close_back','no_confirmation','no_support']) {
   const data=fixture();if(change==='no_raid')data[900].at(-4).low=99.01;

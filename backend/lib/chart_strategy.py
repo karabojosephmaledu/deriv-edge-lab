@@ -78,14 +78,23 @@ def closed_candles(raw, granularity, now, allow_gaps=False):
         raise DemoError("Deriv candle history is unavailable.", 502)
     bars, last = [], -1
     boundary = int(now) // granularity * granularity
-    for value in raw:
+    for index, value in enumerate(raw):
+        if not isinstance(value, dict):
+            raise DemoError("Deriv returned invalid candles.", 502)
         epoch = value.get("epoch")
-        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch % granularity or epoch <= last:
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch <= last:
             raise DemoError("Deriv candle times are inconsistent.", 502)
         last = epoch
         bar = {k: finite(value.get(k)) for k in ("open", "high", "low", "close")}
         if min(bar.values()) <= 0 or bar["low"] > min(bar["open"], bar["close"]) or bar["high"] < max(bar["open"], bar["close"]) or bar["low"] > bar["high"]:
             raise DemoError("Deriv returned invalid candles.", 502)
+        if epoch % granularity:
+            # Session-market history can begin with a partial candle at the
+            # provider's requested-window start. Never use/round that candle,
+            # and never silently drop a misaligned interior observation.
+            if allow_gaps and index == 0:
+                continue
+            raise DemoError("Deriv candle times are inconsistent.", 502)
         if epoch < boundary:
             bars.append({"epoch": epoch, **bar})
     recent=bool(bars) and (bars[-1]["epoch"]==boundary-granularity or allow_gaps and granularity>=3600 and 0<boundary-bars[-1]["epoch"]<=4*86400)

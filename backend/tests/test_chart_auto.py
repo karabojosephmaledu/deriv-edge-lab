@@ -536,6 +536,23 @@ def test_forex_session_gaps_do_not_create_weekend_candles():
     assert len(result)==len(raw) and result[10]["epoch"]-result[9]["epoch"]==1800
 
 
+@pytest.mark.parametrize("granularity",list(FRAMES))
+def test_session_history_discards_only_the_leading_partial_candle(granularity):
+    now=time.time();raw=frames(now)[granularity]
+    partial={**raw[0],"epoch":raw[0]["epoch"]+7}
+    result=closed_candles([partial]+raw[1:],granularity,now,allow_gaps=True)
+    assert result==raw[1:]
+    with pytest.raises(DemoError):closed_candles([partial]+raw[1:],granularity,now)
+
+
+def test_session_history_still_rejects_misaligned_interior_candles_and_short_history():
+    now=time.time();raw=frames(now)[900]
+    bad=[dict(b) for b in raw];bad[10]["epoch"]+=7
+    with pytest.raises(DemoError):closed_candles(bad,900,now,allow_gaps=True)
+    short=[{**raw[-60],"epoch":raw[-60]["epoch"]+7}]+raw[-59:]
+    with pytest.raises(DemoError):closed_candles(short,900,now,allow_gaps=True)
+
+
 def test_catalog_does_not_treat_a_listed_index_as_a_multiplier():
     from lib.market_catalog import market_rows
     active=[{"underlying_symbol":"frxXAUUSD","underlying_symbol_name":"Gold","exchange_is_open":1,"is_trading_suspended":0},{"underlying_symbol":"OTC_NDX","underlying_symbol_name":"US Tech 100","exchange_is_open":1,"is_trading_suspended":0}]
@@ -558,3 +575,17 @@ async def test_minute_rollover_while_loading_does_not_recheck_the_same_actual_ba
     await rt.loop(r)
     assert len(reads)==1
     assert r.checked_bars["R_100"]==int(clock[0])//60*60-60
+
+
+@pytest.mark.asyncio
+async def test_wait_diagnostics_survive_rotation_without_calling_trade_entry(monkeypatch):
+    rt,s,r=setup();original=asyncio.sleep
+    async def read_frames(*args):return frames()
+    async def check(*args):return {"verdict":"NO_STRATEGY_MATCH","wait_summary":"WAIT — original M15/H1 source candle has not closed.","local_diagnostics":[{"timeframe":"M15","reason":"waiting_for_source_close","next_source_close":time.time()+60}]}
+    async def forbidden(*args):raise AssertionError("A WAIT result must not run the trade entry pipeline")
+    async def stop(delay):r.status="stopped";await original(0)
+    rt.frames=read_frames;rt.analyze=check;rt.entry=forbidden;monkeypatch.setattr(chart_auto.asyncio,"sleep",stop)
+    await rt.loop(r)
+    row=r.public()["markets"][0]
+    assert "M15/H1" in row["note"] and row["rule_checks"][0]["reason"]=="waiting_for_source_close"
+    assert row["verdict"]=="WAIT" and not r.history and not r.pending
