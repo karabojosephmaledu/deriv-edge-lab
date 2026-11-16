@@ -30,7 +30,7 @@ AI_REASONS={"credentials":"API key or provider permissions rejected", "credits":
 
 class AnalysisFailure(DemoError):
     def __init__(self,code,details=None):
-        self.code=code if code in {"ai_unavailable","analysis_failed","analysis_timeout","worker_failed"} else "worker_failed"
+        self.code=code if code in {"ai_unavailable","analysis_failed","analysis_timeout","worker_failed","local_rules_failed"} else "worker_failed"
         self.details=[]
         for row in details if isinstance(details,list) else []:
             if isinstance(row,dict) and type(row.get("slot")) is int and 1<=row["slot"]<=6 and row.get("provider") in {"openai","gemini","openrouter"} and row.get("reason") in AI_REASONS:
@@ -38,9 +38,9 @@ class AnalysisFailure(DemoError):
                 if clean not in self.details:self.details.append(clean)
         text="; ".join(f"slot {r['slot']} ({r['provider']}): {AI_REASONS[r['reason']]}" for r in self.details[:6])
         message=("AI analysis unavailable — "+text if text else
-            "AI analysis exceeded the 45-second scalping budget." if self.code=="analysis_timeout" else
+            "The local rule check exceeded its 45-second safety budget." if self.code=="analysis_timeout" else
             "AI analysis could not return a verified chart result. Check the configured vision models." if self.code in {"ai_unavailable","analysis_failed"} else
-            "The backend scanner could not run. Check its Node runtime and deployment.")
+            "The local rule scanner could not run. Check its Node runtime and deployment.")
         super().__init__(message+" No new order was authorized.",503)
 
 
@@ -73,7 +73,7 @@ def finite(value):
     return result
 
 
-def closed_candles(raw, granularity, now):
+def closed_candles(raw, granularity, now, allow_gaps=False):
     if granularity not in FRAMES or not isinstance(raw, list):
         raise DemoError("Deriv candle history is unavailable.", 502)
     bars, last = [], -1
@@ -88,7 +88,8 @@ def closed_candles(raw, granularity, now):
             raise DemoError("Deriv returned invalid candles.", 502)
         if epoch < boundary:
             bars.append({"epoch": epoch, **bar})
-    if len(bars) < 60 or bars[-1]["epoch"] != boundary - granularity or any(b["epoch"]-a["epoch"] != granularity for a,b in zip(bars,bars[1:])):
+    recent=bool(bars) and (bars[-1]["epoch"]==boundary-granularity or allow_gaps and granularity>=3600 and 0<boundary-bars[-1]["epoch"]<=4*86400)
+    if len(bars) < 60 or not recent or not allow_gaps and any(b["epoch"]-a["epoch"] != granularity for a,b in zip(bars,bars[1:])):
         raise DemoError("Closed candle history is incomplete or stale. No entry was made.", 502)
     return bars[-160:]
 
@@ -123,13 +124,9 @@ def render_chart(symbol, granularity, bars):
 async def scan(symbol, frames, prior=None):
     node = shutil.which("node")
     ready=runtime_status()
-    if not ready["node_available"] or not ready["worker_available"] or not any(os.environ.get(f"CHART_AI_SLOT_{i}_API_KEY") for i in range(1,7)):
-        raise DemoError("Configure the server's AI vision slots and Node 24 before automatic analysis.", 503)
-    context = {"product":"Deriv Options Multipliers", "symbol":symbol,"mode":"scalping",
-        "closed_candles":{str(g):bars for g,bars in frames.items()},
-        "execution_format":"For a currently valid immediate entry only, optionally supply multiplier_plan with direction BUY/SELL and four anchors: entry_low, entry_high, stop_anchor, target_anchor. Each anchor is {granularity,epoch,field}, with field open/high/low/close from the supplied ACTUAL closed candles. Entry bounds describe the documented retest zone. Stop anchor is the invalidation extreme; execution places its stop one price increment beyond it. Target anchor is the opposite documented zone/liquidity. Supply source_strategy_ids and source_pages. Do not choose arbitrary anchors to fill gaps: if the source does not define a protective stop, target or complete entry, return WAIT and multiplier_plan:null. Never transplant PDF example prices. Evaluate every strategy first. No prediction or score alone authorizes an order."}
-    images=await asyncio.to_thread(lambda:[render_chart(symbol,g,bars) for g,bars in frames.items()])
-    payload=json.dumps({"images":images,"priorAnalysis":prior,"context":json.dumps(context)}).encode()
+    if not ready["node_available"] or not ready["worker_available"]:
+        raise DemoError("The local scanner requires Node 24 and its bundled rule files.", 503)
+    payload=json.dumps({"symbol":symbol,"frames":frames}).encode()
     process=await asyncio.create_subprocess_exec(node,str(WORKER),stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL)
     try:

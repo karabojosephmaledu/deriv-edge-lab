@@ -339,7 +339,7 @@ function tick(t) {
   state.lastEpoch = epoch; state.lastTickAt = Date.now(); state.feed = "live"; renderMarket();
   const text = price.toFixed(pip), digit = Number(text.at(-1));
   $("quote-main").textContent = text.slice(0,-1); $("quote-digit").textContent = digit;
-  $("quote-meta").textContent = (SYMBOLS.find(s => s[0] === symbol)?.[1] || symbol) + " · " + timestamp(epoch) + " · live";
+  $("quote-meta").textContent = (SYMBOLS.find(s => s[0] === symbol)?.[1] || $("symbol-select").selectedOptions[0]?.textContent || symbol) + " · " + timestamp(epoch) + " · live";
   state.trail.unshift(digit); state.trail = state.trail.slice(0,10);
   state.digits.push(digit); state.digits = state.digits.slice(-100);
   const trail = $("tick-trail"); trail.textContent = "";

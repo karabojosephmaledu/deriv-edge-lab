@@ -79,7 +79,8 @@ def enabled(monkeypatch):
 
 def setup(**patch):
     b=Broker();s=Session(TOKEN,"oauth",time.time()+3600,ORIGIN);b.sessions[s.sid]=s
-    rt=Runtime(b,Channel);r=Run("controlled-run",configuration(**patch),s,Channel(patch.get("mode","demo")))
+    async def catalog():return [{"symbol":code,"name":code,"supported":True,"open":True,"market":"synthetic_index"} for code in ["R_100","R_25","frxXAUUSD","cryBTCUSD"]]
+    rt=Runtime(b,Channel,market_loader=catalog);r=Run("controlled-run",configuration(**patch),s,Channel(patch.get("mode","demo")))
     r.tick={"epoch":int(time.time()),"received":time.monotonic(),"pip":2}
     b.db.demo_account_locks.rows[r.cfg.account_id]={"_id":r.cfg.account_id,"order_id":r.id,"state":"chart-scanning","instance":INSTANCE}
     b.db.chart_runs.rows[r.id]={"_id":r.id,"instance":INSTANCE}
@@ -381,7 +382,7 @@ def test_missing_node_is_not_reported_as_ready(monkeypatch):
 def test_missing_bundled_worker_blocks_start_before_any_order(monkeypatch,tmp_path):
     monkeypatch.setattr(chart_strategy,"WORKER",tmp_path/"missing.ts")
     assert chart_auto.flags()["worker_available"] is False
-    with pytest.raises(DemoError,match="bundled scanner"):chart_auto.require_enabled(configuration())
+    with pytest.raises(DemoError,match="bundled.*scanner"):chart_auto.require_enabled(configuration())
 
 
 def test_render_backend_only_checkout_contains_a_loadable_original_worker(tmp_path):
@@ -477,3 +478,83 @@ async def test_scalping_signal_that_expires_during_quoting_cannot_buy():
     r.channel.request=delayed;await rt.entry(r,f,analysis(f))
     assert not any("buy" in q for q in r.channel.calls)
     assert r.phase=="waiting" and "next M1 candle" in r.note
+
+
+def test_local_mode_requires_no_ai_key(monkeypatch):
+    for i in range(1,7):monkeypatch.delenv(f"CHART_AI_SLOT_{i}_API_KEY",raising=False)
+    chart_auto.require_enabled(configuration())
+    assert chart_auto.flags()["analysis_engine"]=="local_rules" and not chart_auto.flags()["ai_required"]
+
+
+@pytest.mark.parametrize("symbols",[[],["R_100","R_100"],["forged"],["R_100"]*17])
+def test_invalid_watchlists_are_rejected(symbols):
+    with pytest.raises(ValidationError):configuration(symbols=symbols)
+
+
+def test_watchlist_and_original_single_symbol_are_compatible():
+    assert configuration().symbols==["R_100"]
+    cfg=configuration(symbols=["frxXAUUSD","cryBTCUSD"])
+    assert cfg.symbol=="frxXAUUSD" and cfg.symbols==["frxXAUUSD","cryBTCUSD"]
+
+
+@pytest.mark.asyncio
+async def test_rotation_scans_only_selected_markets_and_skips_waiting_candidates(monkeypatch):
+    rt,s,r=setup(symbols=["R_100","frxXAUUSD"]);calls=[];original=asyncio.sleep
+    async def read_frames(*args):return frames()
+    async def check(symbol,*args):calls.append(symbol);return {"verdict":"WAIT"}
+    async def stop(delay):r.status="stopped";await original(0)
+    rt.frames=read_frames;rt.analyze=check;monkeypatch.setattr(chart_auto.asyncio,"sleep",stop)
+    await rt.loop(r)
+    assert calls==["R_100","frxXAUUSD"] and set(r.market_status)==set(r.cfg.symbols)
+    assert not any("buy" in q for q in r.channel.calls)
+
+
+@pytest.mark.asyncio
+async def test_closed_markets_do_not_block_other_selected_markets(monkeypatch):
+    rt,s,r=setup(symbols=["R_100","frxXAUUSD"]);original=asyncio.sleep;calls=[]
+    async def catalog():return [{"symbol":"R_100","supported":True,"open":False},{"symbol":"frxXAUUSD","supported":True,"open":True,"market":"commodities"}]
+    async def read_frames(*args):return frames()
+    async def check(symbol,*args):calls.append(symbol);return {"verdict":"WAIT"}
+    async def stop(delay):r.status="stopped";await original(0)
+    rt.market_loader=catalog;rt.frames=read_frames;rt.analyze=check;monkeypatch.setattr(chart_auto.asyncio,"sleep",stop)
+    await rt.loop(r)
+    assert calls==["frxXAUUSD"] and r.market_status["R_100"]["verdict"]=="SKIPPED"
+
+
+@pytest.mark.asyncio
+async def test_unsupported_multiplier_selection_is_rejected_before_buy():
+    rt,s,r=setup()
+    with pytest.raises(DemoError,match="no verified Options Multiplier"):await rt.start(s,configuration(symbols=["OTC_NDX"]))
+    assert not any("buy" in q for q in r.channel.calls)
+
+
+def test_forex_session_gaps_do_not_create_weekend_candles():
+    now=time.time();raw=frames(now)[900]
+    raw=raw[:10]+raw[11:]
+    with pytest.raises(DemoError):closed_candles(raw,900,now)
+    result=closed_candles(raw,900,now,allow_gaps=True)
+    assert len(result)==len(raw) and result[10]["epoch"]-result[9]["epoch"]==1800
+
+
+def test_catalog_does_not_treat_a_listed_index_as_a_multiplier():
+    from lib.market_catalog import market_rows
+    active=[{"underlying_symbol":"frxXAUUSD","underlying_symbol_name":"Gold","exchange_is_open":1,"is_trading_suspended":0},{"underlying_symbol":"OTC_NDX","underlying_symbol_name":"US Tech 100","exchange_is_open":1,"is_trading_suspended":0}]
+    contracts={"frxXAUUSD":[{"underlying_symbol":"frxXAUUSD","contract_type":kind,"multiplier_range":[100]} for kind in ["MULTUP","MULTDOWN"]],"OTC_NDX":[{"contract_type":"CALL"}]}
+    rows={r["symbol"]:r for r in market_rows(active,contracts)}
+    assert rows["frxXAUUSD"]["supported"] and not rows["OTC_NDX"]["supported"]
+
+
+@pytest.mark.asyncio
+async def test_minute_rollover_while_loading_does_not_recheck_the_same_actual_bar(monkeypatch):
+    rt,s,r=setup();clock=[time.time()];reads=[];sleeps=[];original=asyncio.sleep
+    monkeypatch.setattr(chart_auto.time,"time",lambda:clock[0])
+    async def read_frames(*args):clock[0]+=60;reads.append(clock[0]);return frames(clock[0])
+    async def check(*args):return {"verdict":"WAIT"}
+    async def stop(delay):
+        sleeps.append(delay)
+        if len(sleeps)==3:r.status="stopped"
+        await original(0)
+    rt.frames=read_frames;rt.analyze=check;monkeypatch.setattr(chart_auto.asyncio,"sleep",stop)
+    await rt.loop(r)
+    assert len(reads)==1
+    assert r.checked_bars["R_100"]==int(clock[0])//60*60-60

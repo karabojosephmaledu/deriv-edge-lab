@@ -11,6 +11,7 @@ import json
 import os
 import secrets
 import time
+import re
 from dataclasses import dataclass, field
 from urllib.parse import quote, urlsplit, parse_qs
 
@@ -23,6 +24,7 @@ from websockets.asyncio.client import connect
 
 from lib.deriv_demo import Channel, DemoError, DemoRejected, SYMBOLS, amount, INSTANCE
 from lib.chart_strategy import FRAMES, ENTRY_FRAME, SCAN_TIMEOUT, closed_candles, scan, price_plan, quote_limits, verify_final_quote, finite, runtime_status, AnalysisFailure
+from lib.market_catalog import load_markets
 from routers import deriv
 
 router=APIRouter()
@@ -34,7 +36,8 @@ def flags():
         "demo_enabled":enabled and os.environ.get("DERIV_DEMO_TRADING_ENABLED","").lower()=="true",
         "real_enabled":enabled and os.environ.get("DERIV_LIVE_TRADING_ENABLED","").lower()=="true",
         "ai_configured":any(os.environ.get(f"CHART_AI_SLOT_{n}_API_KEY") for n in range(1,7)),
-        **runtime_status(), "product":"Options Multipliers", "cadence_seconds":ENTRY_FRAME,"analysis_timeout_seconds":SCAN_TIMEOUT}
+        **runtime_status(), "product":"Options Multipliers", "analysis_engine":"local_rules","ai_required":False,
+        "cadence_seconds":ENTRY_FRAME,"analysis_timeout_seconds":SCAN_TIMEOUT}
 
 
 class AutoConfig(BaseModel):
@@ -42,6 +45,7 @@ class AutoConfig(BaseModel):
     account_id:str=Field(min_length=1,max_length=80)
     mode:str
     symbol:str="R_100"
+    symbols:list[str]|None=Field(default=None,min_length=1,max_length=16)
     stake:float=Field(gt=0,le=500,strict=True)
     target:float=Field(gt=0,strict=True)
     max_loss:float=Field(gt=0,strict=True)
@@ -49,12 +53,14 @@ class AutoConfig(BaseModel):
 
     @model_validator(mode="after")
     def valid(self):
-        if self.mode not in {"demo","real"} or self.symbol not in SYMBOLS:
+        selected=self.symbols if self.symbols is not None else [self.symbol]
+        if self.mode not in {"demo","real"} or len(set(selected))!=len(selected) or any(not re.fullmatch(r"(?:R_\d+|1HZ\d+V|frx[A-Z]{6}|cry[A-Z]{6}|OTC_[A-Z0-9]+)",s) for s in selected):
             raise ValueError("Select an authorized Demo or Real Options account and supported market")
         if self.stake<1 or any(amount(v)!=v for v in (self.stake,self.target,self.max_loss)) or self.max_loss<self.stake:
             raise ValueError("Use cents, a stake of at least $1, and a loss limit covering one full stake")
         if self.mode=="real" and not self.acknowledge_live:
             raise ValueError("Explicit Live-account selection is required")
+        self.symbols=selected;self.symbol=selected[0]
         return self
 
 
@@ -62,8 +68,8 @@ def require_enabled(cfg):
     f=flags()
     if not f["enabled"] or not f[cfg.mode+"_enabled"]:
         raise DemoError("Automatic "+cfg.mode+" execution is disabled on the backend.",403)
-    if not f["ai_configured"] or not f["node_available"] or not f["worker_available"]:
-        raise DemoError("Configure server-side vision slots, Node 24 and the bundled scanner before starting.",503)
+    if not f["node_available"] or not f["worker_available"]:
+        raise DemoError("Configure Node 24 and the bundled local scanner before starting.",503)
 
 
 def execution_url(url, kind):
@@ -107,6 +113,18 @@ class Run:
     next_check_at:float|None=None
     error_code:str|None=None
     error_details:list=field(default_factory=list)
+    current_symbol:str|None=None
+    ticks:dict=field(default_factory=dict)
+    checked_bars:dict=field(default_factory=dict)
+    frame_cache:dict=field(default_factory=dict)
+    frame_boundaries:dict=field(default_factory=dict)
+    market_status:dict=field(default_factory=dict)
+    market_info:dict=field(default_factory=dict)
+    cursor:int=0
+    subscribed:set=field(default_factory=set)
+
+    @property
+    def symbol(self):return self.current_symbol or self.cfg.symbol
 
     def activity(self,phase,note):
         self.phase=phase;self.phase_at=time.time();self.note=note
@@ -114,7 +132,7 @@ class Run:
     def public(self):
         settled=[o for o in self.history if o.get("status") in {"win","loss","break-even"}]
         wins=sum(o["profit"]>0 for o in settled); losses=sum(o["profit"]<0 for o in settled)
-        return {"id":self.id,"account_id":self.cfg.account_id,"mode":self.cfg.mode,"symbol":self.cfg.symbol,
+        return {"id":self.id,"account_id":self.cfg.account_id,"mode":self.cfg.mode,"symbol":self.symbol,"symbols":self.cfg.symbols,"markets":list(self.market_status.values()),
             "status":self.status,"stake":self.cfg.stake,"target":self.cfg.target,"max_loss":self.cfg.max_loss,
             "net":self.net,"wins":wins,"losses":losses,"settled":len(settled),
             "win_rate":wins/len(settled) if settled else None,"history":self.history[:20],"pending":self.pending,
@@ -125,8 +143,8 @@ class Run:
 
 
 class Runtime:
-    def __init__(self,broker=None,channel_factory=AutoChannel,analyze=scan):
-        self._broker=broker; self.channel_factory=channel_factory; self.analyze=analyze; self.runs={};self.start_lock=asyncio.Lock()
+    def __init__(self,broker=None,channel_factory=AutoChannel,analyze=scan,market_loader=load_markets):
+        self._broker=broker; self.channel_factory=channel_factory; self.analyze=analyze; self.market_loader=market_loader;self.runs={};self.start_lock=asyncio.Lock()
 
     @property
     def broker(self):return self._broker or deriv.broker()
@@ -165,11 +183,13 @@ class Runtime:
 
     def message(self,r,m):
         t=m.get("tick")
-        if t and t.get("symbol")==r.cfg.symbol:
+        if t and t.get("symbol") in r.cfg.symbols:
             try:
                 if type(t.get("epoch")) is not int or type(t.get("pip_size")) is not int or finite(t.get("quote"))<=0:return
-                if r.tick and t["epoch"]<=r.tick["epoch"]:return
-                r.tick={"epoch":t["epoch"],"quote":finite(t["quote"]),"pip":t["pip_size"],"received":time.monotonic()}
+                previous=r.ticks.get(t["symbol"])
+                if previous and t["epoch"]<=previous["epoch"]:return
+                r.ticks[t["symbol"]]={"epoch":t["epoch"],"quote":finite(t["quote"]),"pip":t["pip_size"],"received":time.monotonic()}
+                if t["symbol"]==r.symbol:r.tick=r.ticks[t["symbol"]]
             except DemoError:pass
 
     def disconnected(self,r):
@@ -190,6 +210,10 @@ class Runtime:
             if s.pending or s.status in {"running","paused"}:raise DemoError("The original Demo bot already has a session or contract.",409)
             r=Run(secrets.token_hex(16),cfg,s); self.fresh(r)
             await self.account(s,cfg)
+            catalog={m["symbol"]:m for m in await self.market_loader()}
+            if any(code not in catalog or not catalog[code]["supported"] for code in cfg.symbols):
+                raise DemoError("A selected market has no verified Options Multiplier contracts. Choose only enabled markets.",409)
+            r.market_info=catalog
             try:
                 await self.db.demo_account_locks.find_one_and_update({"_id":cfg.account_id,"state":"idle"},
                     {"$set":{"state":"chart-scanning","order_id":r.id,"instance":INSTANCE}},upsert=True,return_document=ReturnDocument.AFTER)
@@ -200,7 +224,9 @@ class Runtime:
                 if await self.portfolio(r):raise DemoError("Let the account's existing contracts finish before automatic trading.",409)
                 if await self.balance(r)<cfg.stake:raise DemoError("The authorized account has insufficient available balance.",409)
                 await self.db.chart_runs.insert_one({"_id":r.id,"account_id":cfg.account_id,"config":cfg.model_dump(),"status":"running","net":0,"last_bar":0,"instance":INSTANCE,"created_at":time.time()})
-                await r.channel.request({"ticks":cfg.symbol,"subscribe":1})
+                for code in cfg.symbols:
+                    if catalog[code].get("open"):
+                        await r.channel.request({"ticks":code,"subscribe":1});r.subscribed.add(code)
             except BaseException:
                 if r.channel:await r.channel.close()
                 await self.db.demo_account_locks.update_one({"_id":cfg.account_id,"order_id":r.id,"instance":INSTANCE},{"$set":{"state":"idle"}})
@@ -234,10 +260,17 @@ class Runtime:
     async def frames(self,r):
         frames={}
         for g in FRAMES:
+            cached=r.frame_cache.get((r.symbol,g))
+            boundary=int(time.time())//g*g-g
+            if cached and r.frame_boundaries.get((r.symbol,g))==boundary:
+                frames[g]=cached;continue
             r.note="Loading "+FRAMES[g]+" closed Deriv candles."
-            try:response=await r.channel.request({"ticks_history":r.cfg.symbol,"end":"latest","style":"candles","granularity":g,"count":161})
+            try:response=await r.channel.request({"ticks_history":r.symbol,"end":"latest","style":"candles","granularity":g,"count":161})
             except DemoError as exc:raise DemoError("Could not load "+FRAMES[g]+" market history. "+str(exc),exc.status) from None
-            frames[g]=closed_candles(response.get("candles"),g,time.time())
+            gaps=r.market_info.get(r.symbol,{}).get("market") in {"forex","commodities","indices"}
+            frames[g]=closed_candles(response.get("candles"),g,time.time(),allow_gaps=gaps)
+            r.frame_cache[r.symbol,g]=frames[g]
+            r.frame_boundaries[r.symbol,g]=boundary
         return frames
 
     async def entry(self,r,frames,result):
@@ -251,17 +284,17 @@ class Runtime:
                 raise DemoError("WAIT — the provider price feed is stale.",409)
             if frames[ENTRY_FRAME][-1]["epoch"]!=int(time.time())//ENTRY_FRAME*ENTRY_FRAME-ENTRY_FRAME:
                 raise DemoError("WAIT — a new entry candle closed during analysis; refresh the setup.",409)
-            plan=price_plan(result,r.cfg.symbol,frames,r.tick["pip"])
+            plan=price_plan(result,r.symbol,frames,r.tick["pip"])
             await self.account(r.source,r.cfg)
             if await self.balance(r)<r.cfg.stake or await self.portfolio(r):raise DemoError("WAIT — balance or existing contracts block a new entry.",409)
             kind="MULTUP" if plan["direction"]=="BUY" else "MULTDOWN"
-            available=((await r.channel.request({"contracts_for":r.cfg.symbol})).get("contracts_for") or {}).get("available",[])
-            contract=next((c for c in available if c.get("contract_type")==kind and c.get("underlying_symbol")==r.cfg.symbol),{})
+            available=((await r.channel.request({"contracts_for":r.symbol})).get("contracts_for") or {}).get("available",[])
+            contract=next((c for c in available if c.get("contract_type")==kind and c.get("underlying_symbol")==r.symbol),{})
             multiples=contract.get("multiplier_range")
             if not isinstance(multiples,list) or not multiples or any(type(v) is not int or v<=0 for v in multiples):
                 raise DemoError("Deriv has not confirmed an available Multiplier for this symbol.",409)
             multiplier=min(multiples) # Lowest provider-listed leverage; no stake progression.
-            query={"proposal":1,"amount":r.cfg.stake,"basis":"stake","currency":"USD","underlying_symbol":r.cfg.symbol,"contract_type":kind,"multiplier":multiplier}
+            query={"proposal":1,"amount":r.cfg.stake,"basis":"stake","currency":"USD","underlying_symbol":r.symbol,"contract_type":kind,"multiplier":multiplier}
             r.activity("quoting","Checking the authenticated Deriv entry quote and protective exits.")
             first=(await r.channel.request(query)).get("proposal") or {}
             limits=quote_limits(first,plan,r.cfg.stake,multiplier)
@@ -272,9 +305,9 @@ class Runtime:
             if frames[ENTRY_FRAME][-1]["epoch"]!=int(time.time())//ENTRY_FRAME*ENTRY_FRAME-ENTRY_FRAME:
                 r.activity("waiting","WAIT — the next M1 candle closed before quoting finished. No order sent.")
                 return
-            order_id=r.id+":"+str(frames[ENTRY_FRAME][-1]["epoch"])
+            order_id=r.id+":"+r.symbol+":"+str(frames[ENTRY_FRAME][-1]["epoch"])
             order={"_id":order_id,"id":order_id,"run_id":r.id,"account_id":r.cfg.account_id,"status":"ordering",
-                "contract_id":None,"stake":r.cfg.stake,"symbol":r.cfg.symbol,"direction":plan["direction"],"multiplier":multiplier,
+                "contract_id":None,"stake":r.cfg.stake,"symbol":r.symbol,"direction":plan["direction"],"multiplier":multiplier,
                 "limits":limits,"price_plan":plan,"analysis":result,"opened_at":time.time(),"profit":None}
             await self.db.chart_orders.insert_one(order)
             owned=await self.db.demo_account_locks.find_one_and_update({"_id":r.cfg.account_id,"order_id":r.id,"instance":INSTANCE,"state":"chart-scanning"},
@@ -283,7 +316,7 @@ class Runtime:
                 await self.db.chart_orders.update_one({"_id":order_id},{"$set":{"status":"not_sent"}})
                 r.status="stopped"
                 raise DemoError("Account ownership changed during analysis. No buy was sent.",409)
-            r.unresolved=True;r.pending={k:order[k] for k in ("id","status","contract_id","stake","direction","multiplier")}
+            r.unresolved=True;r.pending={k:order[k] for k in ("id","status","contract_id","symbol","stake","direction","multiplier")}
             try:
                 self.fresh(r)
                 send=r.status=="running" and not self.at_limit(r) and frames[ENTRY_FRAME][-1]["epoch"]==int(time.time())//ENTRY_FRAME*ENTRY_FRAME-ENTRY_FRAME
@@ -323,7 +356,7 @@ class Runtime:
                 profit,bought,sold=amount(info.get("profit")),amount(info.get("buy_price")),amount(info.get("sell_price"))
                 if bought!=r.cfg.stake or amount(sold-bought)!=profit or profit < -bought:
                     raise DemoError("Provider settlement amounts could not be verified.",502)
-                record={"id":order["id"],"contract_id":order["contract_id"],"stake":bought,"return":sold,"profit":profit,
+                record={"id":order["id"],"contract_id":order["contract_id"],"symbol":order.get("symbol",r.symbol),"stake":bought,"return":sold,"profit":profit,
                     "status":"win" if profit>0 else "loss" if profit<0 else "break-even","closed_at":finite(info.get("sell_time") or time.time())}
                 await self.db.chart_orders.update_one({"_id":order["_id"]},{"$set":record})
                 if not any(o["id"]==record["id"] for o in r.history):r.history.insert(0,record);r.net=amount(r.net+profit)
@@ -341,23 +374,43 @@ class Runtime:
                 self.fresh(r)
                 if time.monotonic()-r.heartbeat>=10:await self.save(r)
                 if r.status=="running":
-                    # The four history requests are needed once per new closed
-                    # M1 candle, not every two-second status/heartbeat cycle.
                     bar=int(time.time())//ENTRY_FRAME*ENTRY_FRAME-ENTRY_FRAME
-                    if bar!=r.last_bar:
-                        r.activity("loading_candles","Loading closed Deriv market candles.");await self.save(r)
-                        try:frames=await asyncio.wait_for(self.frames(r),12)
-                        except TimeoutError:raise DemoError("Deriv candle history exceeded its 12-second budget. No new order was authorized.",503) from None
-                        bar=frames[ENTRY_FRAME][-1]["epoch"]
-                        r.last_bar=bar;r.activity("analysing","Analysing original chart rules. No contract is open yet.");await self.save(r)
-                        result=await self.analyze(r.cfg.symbol,frames,r.analysis)
-                        r.analysis=result;r.last_check_at=time.time();r.next_check_at=int(time.time())//ENTRY_FRAME*ENTRY_FRAME+ENTRY_FRAME
-                        r.activity("waiting","WAIT — no complete source-supported setup.")
-                        try:await self.entry(r,frames,result)
-                        except DemoError as exc:
-                            if exc.status!=409:raise
-                            r.note=str(exc)
-                        await self.save(r)
+                    if any(r.checked_bars.get(code)!=bar for code in r.cfg.symbols):
+                        r.market_info={m["symbol"]:m for m in await self.market_loader()}
+                        first=r.cursor;before=len(r.history)
+                        for offset in range(len(r.cfg.symbols)):
+                            if r.status!="running" or r.pending or r.unresolved:break
+                            symbol=r.cfg.symbols[(first+offset)%len(r.cfg.symbols)]
+                            if r.checked_bars.get(symbol)==bar:continue
+                            r.checked_bars[symbol]=bar;info=r.market_info.get(symbol,{})
+                            if not info.get("supported") or not info.get("open"):
+                                r.market_status[symbol]={"symbol":symbol,"name":info.get("name",symbol),"verdict":"SKIPPED","note":"Market closed or no verified Multiplier available.","checked_at":time.time()};continue
+                            r.current_symbol=symbol;r.tick=r.ticks.get(symbol,r.tick if len(r.cfg.symbols)==1 else None)
+                            r.activity("loading_candles","Scanning "+info.get("name",symbol)+" — loading closed candles.");await self.save(r)
+                            try:
+                                if symbol not in r.subscribed:
+                                    await r.channel.request({"ticks":symbol,"subscribe":1});r.subscribed.add(symbol)
+                                frames=await asyncio.wait_for(self.frames(r),12)
+                            except (DemoError,TimeoutError) as exc:
+                                if isinstance(exc,DemoError) and exc.status in {401,403} or r.status!="running":raise
+                                r.market_status[symbol]={"symbol":symbol,"name":info.get("name",symbol),"verdict":"WAIT","note":"Closed market history unavailable; no entry.","checked_at":time.time()};continue
+                            r.last_bar=frames[ENTRY_FRAME][-1]["epoch"]
+                            r.checked_bars[symbol]=r.last_bar
+                            r.activity("analysing","Checking local rules on "+info.get("name",symbol)+". No AI credits used.");await self.save(r)
+                            result=await self.analyze(symbol,frames,None)
+                            r.analysis=result;r.last_check_at=time.time();r.next_check_at=int(time.time())//ENTRY_FRAME*ENTRY_FRAME+ENTRY_FRAME
+                            r.activity("waiting","WAIT — no complete locally verified setup on "+info.get("name",symbol)+".")
+                            settled_before=len(r.history)
+                            try:await self.entry(r,frames,result)
+                            except DemoError as exc:
+                                if exc.status!=409:raise
+                                r.note=str(exc)
+                            r.market_status[symbol]={"symbol":symbol,"name":info.get("name",symbol),"verdict":"TRADED" if len(r.history)>settled_before else "WAIT","analysis_verdict":result.get("verdict","WAIT"),"note":r.note,"checked_at":time.time()}
+                            await self.save(r)
+                            if int(time.time())//ENTRY_FRAME*ENTRY_FRAME-ENTRY_FRAME!=bar:break
+                        r.cursor=(first+1)%len(r.cfg.symbols)
+                        if r.status=="running" and len(r.history)==before:r.activity("waiting","WAIT — selected markets checked; no complete eligible setup.")
+                        r.next_check_at=int(time.time())//ENTRY_FRAME*ENTRY_FRAME+ENTRY_FRAME
                 await asyncio.sleep(2)
         except asyncio.CancelledError:
             r.status="stopped";r.note="Server stopped; no automatic restart. Reconcile any acknowledged contract."
@@ -409,7 +462,8 @@ class Runtime:
             if len(unfinished)>1 or any(not o.get("contract_id") for o in unfinished) or lock.get("state")=="chart-ordering" and not unfinished:
                 raise DemoError("An earlier buy has an unknown outcome. Verify it in the Deriv statement; no retry or lock release is allowed.",409)
             r=Run(stored["_id"],cfg,s,status="stopped",note="Recovered monitoring only; automatic entries remain stopped.")
-            r.history=[{k:o.get(k) for k in ("id","contract_id","stake","return","profit","status","closed_at")} for o in orders if o["status"] in {"win","loss","break-even"}]
+            if unfinished:r.current_symbol=unfinished[0].get("symbol") or cfg.symbol
+            r.history=[{k:o.get(k) for k in ("id","contract_id","symbol","stake","return","profit","status","closed_at")} for o in orders if o["status"] in {"win","loss","break-even"}]
             r.net=amount(sum(o["profit"] for o in r.history));r.last_bar=stored.get("last_bar",0)
             await self.channel(r);self.runs[s.sid]=r
             async def watch():
@@ -432,6 +486,10 @@ runtime=Runtime()
 
 @router.get("/deriv/chart/config")
 async def config():return flags()
+
+
+@router.get("/deriv/chart/markets")
+async def markets():return {"markets":await deriv.checked(load_markets()),"checked_at":time.time()}
 
 
 @router.get("/deriv/chart/status")

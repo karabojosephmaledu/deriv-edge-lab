@@ -17,7 +17,8 @@ before(async()=>{
   const send=(code,data)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store, private'});res.end(JSON.stringify(data));};
   if(url.pathname.startsWith('/api/deriv/')){
    model.calls.push({path:url.pathname,method:req.method,body,selected:url.searchParams.get('account_id')});
-   if(url.pathname==='/api/deriv/chart/config')return send(200,{enabled:model.chartEnabled,demo_enabled:true,real_enabled:true,ai_configured:true,node_available:true,worker_available:!model.workerMissing});
+   if(url.pathname==='/api/deriv/chart/config')return send(200,{enabled:model.chartEnabled,demo_enabled:true,real_enabled:true,ai_configured:!model.aiMissing,ai_required:false,analysis_engine:'local_rules',node_available:true,worker_available:!model.workerMissing});
+   if(url.pathname==='/api/deriv/chart/markets')return send(200,{markets:[{symbol:'R_100',name:'Volatility 100 Index',supported:true,open:true},{symbol:'R_25',name:'Volatility 25 Index',supported:true,open:true},{symbol:'frxXAUUSD',name:'Gold / USD',supported:true,open:true},{symbol:'cryBTCUSD',name:'Bitcoin / USD',supported:true,open:true},{symbol:'OTC_NDX',name:'NAS100',supported:false,open:true}]});
    if(url.pathname.startsWith('/api/deriv/chart/')) {
     if(!model.connected)return send(401,{detail:'Sign in'});
     if(req.method==='POST' && req.headers['x-deriv-csrf']!=='mock-csrf')return send(403,{detail:'CSRF failed'});
@@ -87,7 +88,7 @@ test('Start sends the selected Demo account, fixed amounts and existing CSRF; co
  await page.locator('#chart-target').fill('4');await page.locator('#chart-loss').fill('6');await page.locator('#chart-start').click();
  await page.waitForFunction(()=>document.getElementById('chart-pause').disabled===false);
  const request=model.calls.find(c=>c.path.endsWith('/chart/start'));
- assert.deepEqual(request.body,{account_id:'DOT-test',mode:'demo',symbol:'R_100',stake:2,target:4,max_loss:6,acknowledge_live:false});
+ assert.deepEqual(request.body,{account_id:'DOT-test',mode:'demo',symbol:'R_100',symbols:['R_100'],stake:2,target:4,max_loss:6,acknowledge_live:false});
  assert.equal(await page.locator('#account-select').isDisabled(),true);assert.equal(await page.locator('#chart-stake').isDisabled(),true);
  await page.locator('#chart-pause').click();await page.waitForFunction(()=>document.getElementById('chart-pause').textContent==='Resume');
  await page.locator('#chart-pause').click();await page.waitForFunction(()=>document.getElementById('chart-pause').textContent==='Pause');
@@ -129,9 +130,9 @@ test('a missing server worker cannot display a ready Start button',{timeout:1500
 });
 
 test('activity distinguishes analysis, waiting, an acknowledged contract and an error',{timeout:20000},async t=>{
- const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-start').click();
+ const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-start').click();await page.waitForFunction(()=>document.getElementById('chart-pause').disabled===false);
  model.run.phase='analysing';model.run.phase_at=Date.now()/1000;
- await page.waitForFunction(()=>document.getElementById('chart-session-state').textContent.includes('analysing charts'));
+ await page.waitForFunction(()=>document.getElementById('chart-session-state').textContent.includes('checking local chart rules'));
  assert.match(await page.locator('#chart-history').innerText(),/No settled bot trades/);
  model.run.phase='waiting';model.run.last_check_at=Date.now()/1000;model.run.next_check_at=Date.now()/1000+60;
  await page.waitForFunction(()=>document.getElementById('chart-session-state').textContent.includes('waiting for a valid setup'));
@@ -156,7 +157,7 @@ test('visible Deriv account history uses genuine rows without adding them to bot
 });
 
 test('actual session settlements play the preserved sound once and never replay on reload',{timeout:15000},async t=>{
- const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-start').click();
+ const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-start').click();await page.waitForFunction(()=>document.getElementById('chart-pause').disabled===false);
  model.run.history=[{id:'settled-one',contract_id:321,closed_at:1001,stake:1,profit:.25,status:'win'}];model.run.wins=1;model.run.settled=1;model.run.win_rate=1;model.run.net=.25;
  await page.waitForFunction(()=>document.getElementById('chart-wins').textContent==='1');
  assert.deepEqual(await page.evaluate(()=>window.__notes.slice(-2)),[880,1318.5]);
@@ -165,15 +166,40 @@ test('actual session settlements play the preserved sound once and never replay 
 });
 
 test('failed status polling reports unknown activity without pretending a running bot stopped',{timeout:15000},async t=>{
- const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-start').click();model.statusError=true;
+ const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-start').click();await page.waitForFunction(()=>document.getElementById('chart-pause').disabled===false);model.statusError=true;
  await page.waitForFunction(()=>document.getElementById('chart-session-state').textContent.includes('STATUS UNAVAILABLE'));
  assert.equal(model.run.status,'running');assert.match(await page.locator('#chart-error').innerText(),/may still be active/);
  assert.equal(model.calls.filter(c=>c.path.endsWith('/chart/start')).length,1);
 });
 
 test('active session rejects account changes even if the account refresher briefly enables its selector',{timeout:15000},async t=>{
- const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-start').click();
+ const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-start').click();await page.waitForFunction(()=>document.getElementById('chart-pause').disabled===false);
  await page.evaluate(()=>{document.getElementById('account-select').disabled=false;});await page.locator('#account-select').selectOption('ROT-test');
  assert.equal(await page.locator('#account-select').inputValue(),'DOT-test');assert.equal(model.run.account_id,'DOT-test');
  assert.match(await page.locator('#chart-error').innerText(),/Stop the current session/);
+});
+
+test('local trading controls need no AI key and never request an AI provider',{timeout:15000},async t=>{
+ const page=await open(t);model.aiMissing=true;await page.reload();
+ await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);
+ assert.match(await page.locator('#chart-testing').innerText(),/no AI credits/i);
+ await page.locator('#chart-start').click();await page.waitForFunction(()=>document.getElementById('chart-pause').disabled===false);
+ assert.equal(model.run.status,'running');
+});
+
+test('selected markets are submitted together, unsupported indices stay disabled and settings freeze',{timeout:15000},async t=>{
+ const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);
+ await page.locator('#chart-market-summary').click();await page.locator('input[data-market][value="frxXAUUSD"]').check();await page.locator('input[data-market][value="cryBTCUSD"]').check();
+ assert.equal(await page.locator('input[data-market][value="OTC_NDX"]').isDisabled(),true);
+ await page.locator('#chart-start').click();await page.waitForFunction(()=>document.getElementById('chart-pause').disabled===false);
+ assert.deepEqual(model.run.symbols,['R_100','frxXAUUSD','cryBTCUSD']);
+ assert.equal(await page.locator('input[data-market][value="frxXAUUSD"]').isDisabled(),true);
+});
+
+test('server-selected rotation updates the displayed real market without submitting another session',{timeout:15000},async t=>{
+ const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-market-summary').click();await page.locator('input[data-market][value="frxXAUUSD"]').check();await page.locator('#chart-start').click();await page.waitForFunction(()=>document.getElementById('chart-pause').disabled===false);
+ model.run.symbol='frxXAUUSD';model.run.markets=[{symbol:'R_100',name:'Volatility 100',verdict:'WAIT',note:'No complete pattern'}];
+ await page.waitForFunction(()=>document.getElementById('symbol-select').value==='frxXAUUSD');
+ assert.match(await page.locator('#chart-current-market').innerText(),/Gold/);
+ assert.equal(model.calls.filter(c=>c.path.endsWith('/chart/start')).length,1);
 });
