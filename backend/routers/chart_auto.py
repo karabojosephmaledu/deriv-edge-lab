@@ -18,10 +18,11 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
+from pymongo.errors import PyMongoError
 from websockets.asyncio.client import connect
 
 from lib.deriv_demo import Channel, DemoError, DemoRejected, SYMBOLS, amount, INSTANCE
-from lib.chart_strategy import FRAMES, closed_candles, scan, price_plan, quote_limits, verify_final_quote, finite, runtime_status
+from lib.chart_strategy import FRAMES, ENTRY_FRAME, SCAN_TIMEOUT, closed_candles, scan, price_plan, quote_limits, verify_final_quote, finite, runtime_status, AnalysisFailure
 from routers import deriv
 
 router=APIRouter()
@@ -33,7 +34,7 @@ def flags():
         "demo_enabled":enabled and os.environ.get("DERIV_DEMO_TRADING_ENABLED","").lower()=="true",
         "real_enabled":enabled and os.environ.get("DERIV_LIVE_TRADING_ENABLED","").lower()=="true",
         "ai_configured":any(os.environ.get(f"CHART_AI_SLOT_{n}_API_KEY") for n in range(1,7)),
-        **runtime_status(), "product":"Options Multipliers"}
+        **runtime_status(), "product":"Options Multipliers", "cadence_seconds":ENTRY_FRAME,"analysis_timeout_seconds":SCAN_TIMEOUT}
 
 
 class AutoConfig(BaseModel):
@@ -100,6 +101,15 @@ class Run:
     task:object=field(default=None,repr=False)
     unresolved:bool=False
     heartbeat:float=0
+    phase:str="starting"
+    phase_at:float=field(default_factory=time.time)
+    last_check_at:float|None=None
+    next_check_at:float|None=None
+    error_code:str|None=None
+    error_details:list=field(default_factory=list)
+
+    def activity(self,phase,note):
+        self.phase=phase;self.phase_at=time.time();self.note=note
 
     def public(self):
         settled=[o for o in self.history if o.get("status") in {"win","loss","break-even"}]
@@ -108,7 +118,10 @@ class Run:
             "status":self.status,"stake":self.cfg.stake,"target":self.cfg.target,"max_loss":self.cfg.max_loss,
             "net":self.net,"wins":wins,"losses":losses,"settled":len(settled),
             "win_rate":wins/len(settled) if settled else None,"history":self.history[:20],"pending":self.pending,
-            "note":self.note,"error":self.error,"verdict":(self.analysis or {}).get("verdict","WAIT")}
+            "note":self.note,"error":self.error,"verdict":(self.analysis or {}).get("verdict","WAIT"),
+            "phase":self.phase,"phase_at":self.phase_at,"last_check_at":self.last_check_at,
+            "next_check_at":self.next_check_at if self.status=="running" else None,
+            "error_code":self.error_code,"error_details":self.error_details}
 
 
 class Runtime:
@@ -163,7 +176,9 @@ class Runtime:
         r.status="stopped";r.error="Account connection interrupted. New entries stopped; provider exits remain attached to any acknowledged contract."
 
     async def save(self,r):
-        await self.db.chart_runs.update_one({"_id":r.id,"instance":INSTANCE},{"$set":{"status":r.status,"net":r.net,"last_bar":r.last_bar,"note":r.note,"updated_at":time.time()}})
+        await self.db.chart_runs.update_one({"_id":r.id,"instance":INSTANCE},{"$set":{"status":r.status,"net":r.net,"last_bar":r.last_bar,"note":r.note,
+            "phase":r.phase,"phase_at":r.phase_at,"last_check_at":r.last_check_at,"next_check_at":r.next_check_at,
+            "error":r.error,"error_code":r.error_code,"error_details":r.error_details,"updated_at":time.time()}})
         r.heartbeat=time.monotonic()
 
     async def start(self,s,cfg):
@@ -219,7 +234,9 @@ class Runtime:
     async def frames(self,r):
         frames={}
         for g in FRAMES:
-            response=await r.channel.request({"ticks_history":r.cfg.symbol,"end":"latest","style":"candles","granularity":g,"count":161})
+            r.note="Loading "+FRAMES[g]+" closed Deriv candles."
+            try:response=await r.channel.request({"ticks_history":r.cfg.symbol,"end":"latest","style":"candles","granularity":g,"count":161})
+            except DemoError as exc:raise DemoError("Could not load "+FRAMES[g]+" market history. "+str(exc),exc.status) from None
             frames[g]=closed_candles(response.get("candles"),g,time.time())
         return frames
 
@@ -232,7 +249,7 @@ class Runtime:
                 r.status="stopped";r.note="The remaining loss allowance cannot cover another full stake.";return
             if not r.tick or time.monotonic()-r.tick["received"]>5 or not 0<=time.time()-r.tick["epoch"]<=10:
                 raise DemoError("WAIT — the provider price feed is stale.",409)
-            if frames[900][-1]["epoch"]!=int(time.time())//900*900-900:
+            if frames[ENTRY_FRAME][-1]["epoch"]!=int(time.time())//ENTRY_FRAME*ENTRY_FRAME-ENTRY_FRAME:
                 raise DemoError("WAIT — a new entry candle closed during analysis; refresh the setup.",409)
             plan=price_plan(result,r.cfg.symbol,frames,r.tick["pip"])
             await self.account(r.source,r.cfg)
@@ -245,13 +262,17 @@ class Runtime:
                 raise DemoError("Deriv has not confirmed an available Multiplier for this symbol.",409)
             multiplier=min(multiples) # Lowest provider-listed leverage; no stake progression.
             query={"proposal":1,"amount":r.cfg.stake,"basis":"stake","currency":"USD","underlying_symbol":r.cfg.symbol,"contract_type":kind,"multiplier":multiplier}
+            r.activity("quoting","Checking the authenticated Deriv entry quote and protective exits.")
             first=(await r.channel.request(query)).get("proposal") or {}
             limits=quote_limits(first,plan,r.cfg.stake,multiplier)
             final=(await r.channel.request({**query,"limit_order":limits})).get("proposal") or {}
             verify_final_quote(final,plan,r.cfg.stake,multiplier,limits,time.time())
             self.fresh(r)
             if r.status!="running" or self.at_limit(r):return
-            order_id=r.id+":"+str(frames[900][-1]["epoch"])
+            if frames[ENTRY_FRAME][-1]["epoch"]!=int(time.time())//ENTRY_FRAME*ENTRY_FRAME-ENTRY_FRAME:
+                r.activity("waiting","WAIT — the next M1 candle closed before quoting finished. No order sent.")
+                return
+            order_id=r.id+":"+str(frames[ENTRY_FRAME][-1]["epoch"])
             order={"_id":order_id,"id":order_id,"run_id":r.id,"account_id":r.cfg.account_id,"status":"ordering",
                 "contract_id":None,"stake":r.cfg.stake,"symbol":r.cfg.symbol,"direction":plan["direction"],"multiplier":multiplier,
                 "limits":limits,"price_plan":plan,"analysis":result,"opened_at":time.time(),"profit":None}
@@ -265,7 +286,7 @@ class Runtime:
             r.unresolved=True;r.pending={k:order[k] for k in ("id","status","contract_id","stake","direction","multiplier")}
             try:
                 self.fresh(r)
-                send=r.status=="running" and not self.at_limit(r)
+                send=r.status=="running" and not self.at_limit(r) and frames[ENTRY_FRAME][-1]["epoch"]==int(time.time())//ENTRY_FRAME*ENTRY_FRAME-ENTRY_FRAME
             except DemoError:
                 send=False
             if not send:
@@ -274,12 +295,14 @@ class Runtime:
                 r.unresolved=False;r.pending=None
                 return
             try:
+                r.activity("ordering","Order acknowledgement pending. No duplicate buy will be sent.")
                 receipt=(await r.channel.request({"buy":str(final["id"]),"price":r.cfg.stake})).get("buy") or {}
                 if type(receipt.get("contract_id")) is not int or amount(receipt.get("buy_price"))!=r.cfg.stake:
                     raise DemoError("The provider did not acknowledge a matching contract.",502)
                 order.update(contract_id=receipt["contract_id"],buy_price=amount(receipt["buy_price"]),status="open")
                 await self.db.chart_orders.update_one({"_id":order_id},{"$set":{k:order[k] for k in ("contract_id","buy_price","status")}})
                 r.pending.update(status="open",contract_id=order["contract_id"])
+                r.activity("contract_open","Deriv acknowledged the contract; monitoring its actual settlement.")
             except DemoRejected:
                 await self.db.chart_orders.update_one({"_id":order_id},{"$set":{"status":"rejected"}})
                 r.unresolved=False;r.pending=None;r.status="stopped"
@@ -304,7 +327,9 @@ class Runtime:
                     "status":"win" if profit>0 else "loss" if profit<0 else "break-even","closed_at":finite(info.get("sell_time") or time.time())}
                 await self.db.chart_orders.update_one({"_id":order["_id"]},{"$set":record})
                 if not any(o["id"]==record["id"] for o in r.history):r.history.insert(0,record);r.net=amount(r.net+profit)
-                r.pending=None;r.unresolved=False;self.at_limit(r);await self.save(r)
+                r.pending=None;r.unresolved=False
+                r.activity("waiting","Deriv settled the contract. Waiting for the next closed one-minute candle.")
+                self.at_limit(r);await self.save(r)
                 await self.db.demo_account_locks.update_one({"_id":r.cfg.account_id,"order_id":r.id,"instance":INSTANCE},{"$set":{"state":"chart-scanning"}})
                 return
             if r.pending and info.get("profit") is not None:r.pending["profit"]=amount(info["profit"])
@@ -316,11 +341,18 @@ class Runtime:
                 self.fresh(r)
                 if time.monotonic()-r.heartbeat>=10:await self.save(r)
                 if r.status=="running":
-                    frames=await self.frames(r);bar=frames[900][-1]["epoch"]
+                    # The four history requests are needed once per new closed
+                    # M1 candle, not every two-second status/heartbeat cycle.
+                    bar=int(time.time())//ENTRY_FRAME*ENTRY_FRAME-ENTRY_FRAME
                     if bar!=r.last_bar:
-                        r.last_bar=bar;r.note="Checking original strategy rules on closed Deriv candles.";await self.save(r)
+                        r.activity("loading_candles","Loading closed Deriv market candles.");await self.save(r)
+                        try:frames=await asyncio.wait_for(self.frames(r),12)
+                        except TimeoutError:raise DemoError("Deriv candle history exceeded its 12-second budget. No new order was authorized.",503) from None
+                        bar=frames[ENTRY_FRAME][-1]["epoch"]
+                        r.last_bar=bar;r.activity("analysing","Analysing original chart rules. No contract is open yet.");await self.save(r)
                         result=await self.analyze(r.cfg.symbol,frames,r.analysis)
-                        r.analysis=result;r.note="WAIT — no complete source-supported setup."
+                        r.analysis=result;r.last_check_at=time.time();r.next_check_at=int(time.time())//ENTRY_FRAME*ENTRY_FRAME+ENTRY_FRAME
+                        r.activity("waiting","WAIT — no complete source-supported setup.")
                         try:await self.entry(r,frames,result)
                         except DemoError as exc:
                             if exc.status!=409:raise
@@ -330,9 +362,17 @@ class Runtime:
         except asyncio.CancelledError:
             r.status="stopped";r.note="Server stopped; no automatic restart. Reconcile any acknowledged contract."
             raise
+        except DemoError as exc:
+            failed_phase=r.phase;r.status="stopped";r.phase="error";r.phase_at=time.time()
+            if not r.error:r.error=str(exc)
+            r.error_code=getattr(exc,"code",{"loading_candles":"market_history_failed","quoting":"quote_failed","analysing":"analysis_failed"}.get(failed_phase,"account_connection_failed"))
+            if isinstance(exc,AnalysisFailure):r.error_details=exc.details
+        except PyMongoError:
+            r.status="stopped";r.activity("error","The session database could not be reached.")
+            r.error_code="database_unavailable";r.error="The session database is unavailable. New entries stopped; reconcile any acknowledged contract before restarting."
         except Exception:
-            r.status="stopped"
-            if not r.error:r.error="Automatic session stopped after a connection, configuration or analysis failure. Refresh status before starting again."
+            failed_phase=r.phase;r.status="stopped";r.phase="error";r.phase_at=time.time();r.error_code="server_error"
+            if not r.error:r.error="Unexpected server failure during "+failed_phase.replace("_"," ")+". New entries stopped; refresh account status before retrying."
         finally:
             if not r.unresolved and not r.pending:
                 with contextlib.suppress(Exception):

@@ -393,7 +393,87 @@ def test_render_backend_only_checkout_contains_a_loadable_original_worker(tmp_pa
     env={**os.environ,"PYTHONPATH":str(isolated)}
     for key in list(env):
         if key.startswith("CHART_AI_SLOT_"):env.pop(key)
-    result=subprocess.run([sys.executable,"-c",'from lib.chart_strategy import WORKER,runtime_status; import subprocess; assert runtime_status()["node_available"]; assert WORKER.is_file(); r=subprocess.run(["node",str(WORKER)],input=\'{"images":[]}\',text=True,capture_output=True); assert r.returncode==1 and "unverified" in r.stdout; print("backend-only worker import passed")'],
+    result=subprocess.run([sys.executable,"-c",'from lib.chart_strategy import WORKER,runtime_status; import subprocess; assert runtime_status()["node_available"]; assert WORKER.is_file(); r=subprocess.run(["node",str(WORKER)],input=\'{"images":[]}\',text=True,capture_output=True); assert r.returncode==1 and "error_code" in r.stdout; print("backend-only worker import passed")'],
         cwd=isolated,env=env,capture_output=True,text=True,timeout=10)
     assert result.returncode==0,result.stderr
     assert "backend-only worker import passed" in result.stdout
+
+
+def test_scalping_uses_m1_m5_context_and_a_bounded_analysis_budget():
+    assert chart_strategy.ENTRY_FRAME==60 and {60,300,900,3600,14400,86400}==set(FRAMES)
+    assert chart_strategy.SCAN_TIMEOUT==45
+
+
+def test_provider_diagnostics_keep_only_whitelisted_safe_fields():
+    exc=chart_strategy.AnalysisFailure("ai_unavailable",[
+        {"slot":1,"provider":"gemini","reason":"quota_or_rate_limit","raw":"private-key-canary"},
+        {"slot":2,"provider":"openrouter","reason":"credits"},
+        {"slot":3,"provider":"private-key-canary","reason":"unknown"}])
+    assert "quota" in str(exc) and "credits" in str(exc)
+    assert "private-key-canary" not in str(exc)+json.dumps(exc.details)
+    assert len(exc.details)==2
+
+
+@pytest.mark.asyncio
+async def test_safe_ai_failure_is_visible_and_cannot_create_a_trade():
+    rt,s,r=setup();f=frames()
+    async def read_frames(*args):return f
+    async def fail(*args):raise chart_strategy.AnalysisFailure("ai_unavailable",[{"slot":1,"provider":"gemini","reason":"credentials"}])
+    rt.frames=read_frames;rt.analyze=fail
+    await rt.loop(r)
+    assert r.status=="stopped" and r.phase=="error" and r.error_code=="ai_unavailable"
+    assert "slot 1 (gemini)" in r.error and "permissions rejected" in r.error
+    assert not r.history and not r.pending and r.net==0
+    assert not any("buy" in q for q in r.channel.calls)
+    assert rt.db.chart_runs.rows[r.id]["error_code"]=="ai_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_unexpected_analysis_error_does_not_echo_exception_secrets():
+    rt,s,r=setup();f=frames()
+    async def read_frames(*args):return f
+    async def fail(*args):raise RuntimeError("private-key-canary")
+    rt.frames=read_frames;rt.analyze=fail
+    await rt.loop(r)
+    assert r.error_code=="server_error" and "analysing" in r.error
+    assert "private-key-canary" not in json.dumps(r.public())
+
+
+@pytest.mark.asyncio
+async def test_market_history_is_loaded_once_per_closed_minute_not_every_poll(monkeypatch):
+    rt,s,r=setup();f=frames();calls=[];sleeps=[];original=asyncio.sleep
+    async def read_frames(*args):calls.append("frames");return f
+    async def analyze(*args):calls.append("analysis");return {"verdict":"WAIT"}
+    async def bounded_sleep(delay):
+        sleeps.append(delay)
+        if len(sleeps)==3:r.status="stopped"
+        await original(0)
+    rt.frames=read_frames;rt.analyze=analyze
+    monkeypatch.setattr(chart_auto.asyncio,"sleep",bounded_sleep)
+    await rt.loop(r)
+    assert calls==["frames","analysis"]
+    assert r.last_check_at and r.next_check_at-r.last_check_at<=60
+    assert not any("buy" in q for q in r.channel.calls)
+
+
+@pytest.mark.asyncio
+async def test_open_contract_phase_only_appears_after_provider_acknowledgement():
+    rt,s,r=setup();f=frames();original=r.channel.request;observed=[]
+    async def record(q):
+        observed.append((next(iter(q)),r.phase))
+        return await original(q)
+    r.channel.request=record;await rt.entry(r,f,analysis(f))
+    assert ("buy","ordering") in observed and ("proposal_open_contract","contract_open") in observed
+    assert r.history[0]["profit"]==3.17 and r.phase=="waiting"
+
+
+@pytest.mark.asyncio
+async def test_scalping_signal_that_expires_during_quoting_cannot_buy():
+    rt,s,r=setup();f=frames();original=r.channel.request
+    async def delayed(q):
+        response=await original(q)
+        if q.get("proposal") and q.get("limit_order"):f[60][-1]["epoch"]-=60
+        return response
+    r.channel.request=delayed;await rt.entry(r,f,analysis(f))
+    assert not any("buy" in q for q in r.channel.calls)
+    assert r.phase=="waiting" and "next M1 candle" in r.note

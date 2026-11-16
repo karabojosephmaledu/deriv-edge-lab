@@ -29,6 +29,21 @@ test('six independent environment slots allow the same provider with different c
 test('metadata saying text-only overrides any model-name heuristic',()=>{
  assert.deepEqual(visionModels([{id:'gpt-4o-looking-text',architecture:{input_modalities:['text']}},{id:'actual-model',architecture:{input_modalities:['text','image']}}],'openrouter'),['actual-model']);
 });
+test('discovery prefers fast vision models for the scalping time budget',()=>{
+ assert.deepEqual(visionModels([{id:'gemini-pro'},{id:'gemini-flash'}],'gemini'),['gemini-flash','gemini-pro']);
+});
+test('reasoning-capable vision probes have room for a complete image answer',async()=>{
+ const calls=[];await runVisionSlots(options,[{slot:1,provider:'gemini',key:'probe-budget-test',model:'gemini-flash'}],mock(calls));
+ assert.ok(calls[0].body.max_tokens>=1024);
+});
+test('failed slots report safe HTTP categories without provider body or credentials',async()=>{
+ for(const [status,reason] of [[401,'credentials'],[402,'credits'],[429,'quota_or_rate_limit'],[404,'model_unavailable']]) {
+  await assert.rejects(()=>runVisionSlots(options,[{slot:2,provider:'openrouter',key:'private-key-canary',model:'vision'}],async()=>new Response('private-key-canary',{status})),error=>{
+   assert.deepEqual(error.attempts,[{slot:2,provider:'openrouter',reason}]);
+   assert.ok(!JSON.stringify(error).includes('private-key-canary'));return true;
+  });
+ }
+});
 test('an unsupported first slot cannot disable a valid later slot',()=>{
  const slots=loadVisionSlots({CHART_AI_SLOT_1_PROVIDER:'unknown',CHART_AI_SLOT_1_API_KEY:'bad-test',CHART_AI_SLOT_2_PROVIDER:'openai',CHART_AI_SLOT_2_API_KEY:'good-test'});
  assert.equal(slots.length,1);assert.equal(slots[0].slot,2);

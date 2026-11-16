@@ -10,12 +10,20 @@ const providers = {
   gemini: { base: "https://generativelanguage.googleapis.com/v1beta/openai", hint: /^gemini-/i },
 } as const;
 type Provider = keyof typeof providers;
+export type SlotAttempt = {slot:number; provider:Provider; reason:string};
+class SlotFailure extends Error {
+  readonly code:string;
+  constructor(code:string) { super(code);this.code=code; }
+}
+const safeReason=(error:unknown)=>error instanceof SlotFailure ? error.code
+  : error instanceof SyntaxError ? 'invalid_json'
+  : (error as Error)?.name==='TimeoutError' || (error as Error)?.name==='AbortError' ? 'timeout' : 'network';
 export interface VisionSlot { slot: number; provider: Provider; key: string; model: string }
 export interface SlotMessage { role: string; content: string | unknown[] }
 export class VisionSlotsError extends Error {
   readonly status = 503;
-  readonly attempts: Array<{slot:number; reason:string}>;
-  constructor(attempts: Array<{slot:number; reason:string}>) {
+  readonly attempts: SlotAttempt[];
+  constructor(attempts: SlotAttempt[]) {
     super("No configured vision slot completed the analysis. Check server-side slot configuration and model access.");
     this.attempts=attempts;
   }
@@ -36,6 +44,7 @@ export function loadVisionSlots(env: Record<string,string|undefined> = process.e
 }
 
 export function visionModels(rows: unknown[], provider: Provider): string[] {
+  const rank=(id:string)=>/flash|(?:^|[-/_])mini(?:[-/_]|$)|haiku/i.test(id)?0:/reason|thinking|pro(?:-|$)/i.test(id)?2:1;
   return rows.flatMap(raw => {
     if (!raw || typeof raw!=="object") return [];
     const r=raw as Record<string,any>;
@@ -45,7 +54,7 @@ export function visionModels(rows: unknown[], provider: Provider): string[] {
     // Explicitly text-only metadata always wins over a suggestive model name.
     if (Array.isArray(declared)) return declared.includes('image') ? [id] : [];
     return providers[provider].hint.test(id) ? [id] : [];
-  });
+  }).sort((a,b)=>rank(a)-rank(b));
 }
 
 function messages(system: string|undefined, source: SlotMessage[]) {
@@ -66,7 +75,9 @@ async function request(slot:VisionSlot, path:string, init:RequestInit, fetcher:t
     ...init,headers:{'Content-Type':'application/json',Authorization:`Bearer ${slot.key}`},
     signal:AbortSignal.timeout(60_000),redirect:'error',
   });
-  if(!response.ok) throw new Error(`Provider HTTP ${response.status}`);
+  if(!response.ok) throw new SlotFailure(response.status===401 || response.status===403 ? 'credentials'
+    : response.status===402 ? 'credits' : response.status===429 ? 'quota_or_rate_limit'
+    : response.status===404 ? 'model_unavailable' : response.status===400 || response.status===413 ? 'request_rejected' : 'provider_unavailable');
   return response.json();
 }
 
@@ -76,9 +87,9 @@ async function generate(slot:VisionSlot, model:string, system:string|undefined, 
     ...(slot.provider==='openai' && /^(gpt-5|o[1-9])/.test(model)
       ? {max_completion_tokens:maxTokens} : {temperature:0,max_tokens:maxTokens}),
   })},fetcher);
-  if(body.choices?.[0]?.finish_reason==='length') throw new Error('Model truncated the response');
+  if(body.choices?.[0]?.finish_reason==='length') throw new SlotFailure('output_limit');
   const content=body.choices?.[0]?.message?.content;
-  if(typeof content!=='string' || !content.trim()) throw new Error('Empty model response');
+  if(typeof content!=='string' || !content.trim()) throw new SlotFailure('empty_response');
   return content;
 }
 
@@ -105,11 +116,11 @@ export function createVisionProbe() {
 }
 const verified = new Map<string,number>();
 export async function runVisionSlots(options:{system?:string;messages:SlotMessage[];maxOutputTokens?:number}, slots:VisionSlot[]=loadVisionSlots(), fetcher:typeof fetch=fetch) {
-  const attempts: Array<{slot:number;reason:string}>=[];
+  const attempts: SlotAttempt[]=[];
   for (const slot of slots) {
     try {
       const rows=slot.model ? [slot.model] : visionModels((await request(slot,'/models',{method:'GET'},fetcher)).data ?? [],slot.provider).slice(0,3);
-      if (!rows.length) throw new Error('No vision candidate was discovered');
+      if (!rows.length) throw new SlotFailure('no_vision_model');
       for(const model of rows) {
         try {
           const fingerprint=createHash('sha256').update(`${slot.provider}\0${slot.key}\0${model}`).digest('hex');
@@ -118,21 +129,21 @@ export async function runVisionSlots(options:{system?:string;messages:SlotMessag
             const answer=await generate(slot,model,undefined,[{role:'user',content:[
               {type:'text',text:'Inspect the four quadrants of the attached image. Return a JSON array of four lowercase colour names in this order: top-left, top-right, bottom-left, bottom-right. No explanation.'},
               {type:'image',image:probe.image},
-            ]}],80,fetcher);
-            if(JSON.stringify(JSON.parse(answer.trim().replace(/^```(?:json)?\s*|\s*```$/g,'')))!==JSON.stringify(probe.expected)) throw new Error('Vision probe was not verified');
+            ]}],1024,fetcher);
+            if(JSON.stringify(JSON.parse(answer.trim().replace(/^```(?:json)?\s*|\s*```$/g,'')))!==JSON.stringify(probe.expected)) throw new SlotFailure('vision_probe_failed');
             if(verified.size>36) verified.clear();
             verified.set(fingerprint,Date.now()+600_000);
           }
           const text=await generate(slot,model,options.system,options.messages,options.maxOutputTokens??10000,fetcher);
           const parsed=JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g,''));
-          if(!parsed || typeof parsed!=='object' || Array.isArray(parsed) || typeof parsed.verdict!=='string') throw new Error('Invalid chart JSON');
+          if(!parsed || typeof parsed!=='object' || Array.isArray(parsed) || typeof parsed.verdict!=='string') throw new SlotFailure('invalid_json');
           return {text,provider:slot.provider,model,slot:slot.slot};
-        } catch {
+        } catch (error) {
           // Provider bodies may contain credentials or user charts: never log them.
-          attempts.push({slot:slot.slot,reason:'Model unavailable, image capability unverified, or analysis incomplete.'});
+          attempts.push({slot:slot.slot,provider:slot.provider,reason:safeReason(error)});
         }
       }
-    } catch { attempts.push({slot:slot.slot,reason:'Slot configuration, discovery, or network request failed.'}); }
+    } catch (error) { attempts.push({slot:slot.slot,provider:slot.provider,reason:safeReason(error)}); }
   }
   throw new VisionSlotsError(attempts);
 }
