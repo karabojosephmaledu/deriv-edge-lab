@@ -1,0 +1,44 @@
+{
+  "version": "m1-research-v1",
+  "purpose": "Separate credit-free M1 virtual research; never imported by the broker order worker",
+  "markets": ["R_100", "R_25", "1HZ75V", "frxXAUUSD", "cryBTCUSD"],
+  "periods": {
+    "training": ["2026-10-19T00:00:00Z", "2026-10-26T00:00:00Z"],
+    "validation": ["2026-10-26T00:00:00Z", "2026-11-02T00:00:00Z"],
+    "test": ["2026-11-02T00:00:00Z", "2026-11-09T00:00:00Z"]
+  },
+  "warmup_minutes": 360,
+  "candidates": ["m1-pullback", "m1-breakout"],
+  "parameters": {
+    "fast_ema": 20, "slow_ema": 50, "atr": 14, "breakout_lookback": 20,
+    "reward_to_price_risk": 1.5, "maximum_holding_minutes": 5,
+    "fixed_stake_usd": 1, "multiplier": "lowest provider-listed for both directions",
+    "entry": "Next chronological M1 open, one provider price increment adverse; no same-candle fill",
+    "exits": "Stop first if both barriers touch; adverse gap fills at open; favourable gap fills only at target; time exit at fifth M1 close",
+    "drawdown": "Report settled equity and a separate conservative favourable-first/adverse-second OHLC equity bound, including open positions; qualification uses the larger bound.",
+    "missing_minutes": "Do not carry positions through a gap; mark unresolved and exclude unknown P/L. Do not enter after a recent gap until warmup is rebuilt."
+  },
+  "costs": {
+    "base": "Current public commission snapshot at $1 and the lowest common listed multiplier, separately for each direction. Not historical/authenticated contract prices.",
+    "stress": "Reprice the same positions and exit paths with twice snapshot commission plus one additional adverse increment at entry and exit. Sensitivity scenario, not an asserted provider fee. Never discard positions to improve stress results.",
+    "eligibility": "Both net target and net stop must satisfy the public quote validation limits; risk cannot exceed stake. Current limits are a feasibility scenario, not historical account eligibility."
+  },
+  "selection": {
+    "minimum_training_trades": 100, "minimum_validation_trades": 100,
+    "minimum_validation_days": 5, "validation_blocks": 3,
+    "maximum_drawdown_stakes": 10, "require_positive_each_validation_block": true,
+    "require_positive_training_validation_and_stress": true,
+    "bootstrap_samples": 2000, "familywise_alpha": 0.05, "seed": 20261116,
+    "bound": "Resample complete UTC-day portfolio net returns; one-sided alpha divided by candidate count. Descriptive dependent-block sensitivity, not a proven probability.",
+    "ranking": "Highest validation net per fixed stake, ties by lower drawdown then candidate id",
+    "holdout": "Selection uses training and validation only. Test is evaluated once after selection and may veto readiness, never select an alternative. No tuning after unblinding.",
+    "portfolio": "One position across selected markets. Simultaneous signals ranked by closed-bar EMA separation / ATR, then symbol. Fixed stake, no loss recovery.",
+    "no_trade": "No qualifying candidate means NO TRADE; no automatic fallback and no broker execution."
+  },
+  "limitations": [
+    "Previously uninspected historical data, not a prospective forward test or three-month study.",
+    "OHLC cannot verify tick path, bid/ask spread, authenticated fills, contract financing or stop execution. Ambiguous bars use the adverse order.",
+    "Current commission/precision/contract-limit scenarios cannot establish historical executable profit.",
+    "Frequent checks do not promise entries every minute. New presets are not the original PDF strategies."
+  ]
+}

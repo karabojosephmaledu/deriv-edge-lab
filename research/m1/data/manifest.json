@@ -1,0 +1,237 @@
+{
+  "version": "m1-research-v1",
+  "frozen_commit": "164d2d9027a10707eed48b4c6f45402131782a2a",
+  "frozen_sha256": {
+    "research/m1/protocol.json": "6513147f165414eda4fc70f7428fa8caee52c1dbb14aace52ef19f3e8c009b69",
+    "research/m1/engine.mjs": "d7dff68c8454a65d930c0273e2a86bc648a07a6edb1ec24decdef12a3cab340d",
+    "scripts/capture-m1-research.py": "ba0e91ed66159a7a8666d55693405c2a71dfefd6d6ef2d79998d68d60634751e",
+    "scripts/evaluate-m1-research.mjs": "4bf716c648a8f5f48d905ef233a84f4121341ab0724eddb78e21a405d0ca9772"
+  },
+  "markets": [
+    {
+      "symbol": "R_100",
+      "bars": 30591,
+      "first": 1792346400,
+      "last": 1794182340,
+      "unavailable_pages": [],
+      "quote": {
+        "pip": 2,
+        "captured_at": 1794847946,
+        "historical_executable": false,
+        "BUY": {
+          "ask_price": 1.0,
+          "commission": 0.02,
+          "multiplier": 40,
+          "spot_time": 1794847946,
+          "validation_params": {
+            "stop_loss": {
+              "max": 1.0,
+              "min": 0.1
+            },
+            "take_profit": {
+              "max": 36.0,
+              "min": 0.1
+            }
+          }
+        },
+        "SELL": {
+          "ask_price": 1.0,
+          "commission": 0.02,
+          "multiplier": 40,
+          "spot_time": 1794847946,
+          "validation_params": {
+            "stop_loss": {
+              "max": 1.0,
+              "min": 0.1
+            },
+            "take_profit": {
+              "max": 36.0,
+              "min": 0.1
+            }
+          }
+        }
+      },
+      "sha256": "19558ef572c65a72fab0425b82410135cb466071c59fd3f6a0dde145f9bfc184"
+    },
+    {
+      "symbol": "R_25",
+      "bars": 30593,
+      "first": 1792346400,
+      "last": 1794182340,
+      "unavailable_pages": [],
+      "quote": {
+        "pip": 3,
+        "captured_at": 1794847946,
+        "historical_executable": false,
+        "BUY": {
+          "ask_price": 1.0,
+          "commission": 0.02,
+          "multiplier": 160,
+          "spot_time": 1794847946,
+          "validation_params": {
+            "stop_loss": {
+              "max": 1.0,
+              "min": 0.1
+            },
+            "take_profit": {
+              "max": 50.0,
+              "min": 0.1
+            }
+          }
+        },
+        "SELL": {
+          "ask_price": 1.0,
+          "commission": 0.02,
+          "multiplier": 160,
+          "spot_time": 1794847946,
+          "validation_params": {
+            "stop_loss": {
+              "max": 1.0,
+              "min": 0.1
+            },
+            "take_profit": {
+              "max": 50.0,
+              "min": 0.1
+            }
+          }
+        }
+      },
+      "sha256": "1d85e4d4a5f576f1b9f71ed253e69535b93eaa2e0fbad5790acfd6962d9f94ab"
+    },
+    {
+      "symbol": "1HZ75V",
+      "bars": 30593,
+      "first": 1792346400,
+      "last": 1794182340,
+      "unavailable_pages": [],
+      "quote": {
+        "pip": 2,
+        "captured_at": 1794847946,
+        "historical_executable": false,
+        "BUY": {
+          "ask_price": 1.0,
+          "commission": 0.02,
+          "multiplier": 50,
+          "spot_time": 1794847946,
+          "validation_params": {
+            "stop_loss": {
+              "max": 1.0,
+              "min": 0.1
+            },
+            "take_profit": {
+              "max": 45.0,
+              "min": 0.1
+            }
+          }
+        },
+        "SELL": {
+          "ask_price": 1.0,
+          "commission": 0.02,
+          "multiplier": 50,
+          "spot_time": 1794847947,
+          "validation_params": {
+            "stop_loss": {
+              "max": 1.0,
+              "min": 0.1
+            },
+            "take_profit": {
+              "max": 45.0,
+              "min": 0.1
+            }
+          }
+        }
+      },
+      "sha256": "7a72a3340af38c714747f11d44fa226843d82baa8c3c33d3bae907c26cb1d5c5"
+    },
+    {
+      "symbol": "frxXAUUSD",
+      "bars": 20321,
+      "first": 1792368000,
+      "last": 1793998500,
+      "unavailable_pages": [],
+      "quote": {
+        "pip": 2,
+        "captured_at": 1794847968,
+        "historical_executable": false,
+        "BUY": {
+          "ask_price": 1.0,
+          "commission": 0.02,
+          "multiplier": 100,
+          "spot_time": 1794847968,
+          "validation_params": {
+            "stop_loss": {
+              "max": 1.0,
+              "min": 0.1
+            },
+            "take_profit": {
+              "max": 50.0,
+              "min": 0.1
+            }
+          }
+        },
+        "SELL": {
+          "ask_price": 1.0,
+          "commission": 0.02,
+          "multiplier": 100,
+          "spot_time": 1794847969,
+          "validation_params": {
+            "stop_loss": {
+              "max": 1.0,
+              "min": 0.1
+            },
+            "take_profit": {
+              "max": 50.0,
+              "min": 0.1
+            }
+          }
+        }
+      },
+      "sha256": "52605c80298a4754b562a88e652b32aad37ad774c2efcd6196329c263b0b9ee2"
+    },
+    {
+      "symbol": "cryBTCUSD",
+      "bars": 30572,
+      "first": 1792346400,
+      "last": 1794182340,
+      "unavailable_pages": [],
+      "quote": {
+        "pip": 3,
+        "captured_at": 1794847973,
+        "historical_executable": false,
+        "BUY": {
+          "ask_price": 1.0,
+          "commission": 0.08,
+          "multiplier": 100,
+          "spot_time": 1794847973,
+          "validation_params": {
+            "stop_loss": {
+              "max": 1.0,
+              "min": 0.1
+            },
+            "take_profit": {
+              "max": 50.0,
+              "min": 0.1
+            }
+          }
+        },
+        "SELL": {
+          "ask_price": 1.0,
+          "commission": 0.08,
+          "multiplier": 100,
+          "spot_time": 1794847973,
+          "validation_params": {
+            "stop_loss": {
+              "max": 1.0,
+              "min": 0.1
+            },
+            "take_profit": {
+              "max": 50.0,
+              "min": 0.1
+            }
+          }
+        }
+      },
+      "sha256": "9ba7e788c0a09b4a7f10e99b861e347d200322a96bd8b25eed425925c2ac3be1"
+    }
+  ]
+}
