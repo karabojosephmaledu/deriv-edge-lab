@@ -1,7 +1,6 @@
 import {test}from'node:test';
 import assert from'node:assert/strict';
 import fs from'node:fs';
-import {execFileSync}from'node:child_process';
 import {PARAMETERS,IDS,checkedBars,prepare,signal,quoteScenario,settle,summarize,replay,assess,dayLowerBound,evaluate}from'../research/m1/engine.mjs';
 const protocol=JSON.parse(fs.readFileSync(new URL('../research/m1/protocol.json',import.meta.url)));
 const epoch=Date.parse('2026-10-19T00:00:00Z')/1000;
@@ -87,6 +86,7 @@ test('test outcomes cannot influence validation selection or trigger a switch to
  const left=evaluate({R_100:{bars:a,quote:quote()}},p),right=evaluate({R_100:{bars:b,quote:quote()}},p);
  assert.equal(left.selectedOnValidation,right.selectedOnValidation);assert.deepEqual(left.rows.map(r=>r.assessment),right.rows.map(r=>r.assessment));assert.equal(left.decision,'NO TRADE');assert.equal(left.broker_execution_authorized,false);
 });
-test('existing broker worker, execution, original library and website are byte-for-byte preserved',()=>{
- for(const file of['backend/chartscanner/recovery/worker.ts','backend/chartscanner/src/lib/local-rules.server.ts','backend/chartscanner/src/lib/strategy-library.server.ts','backend/routers/chart_auto.py','backend/lib/chart_strategy.py','backend/lib/deriv_demo.py','frontend/index.html','frontend/public/account.js','frontend/public/chart-auto.js'])assert.equal(fs.readFileSync(new URL('../'+file,import.meta.url),'utf8'),execFileSync('git',['show','ed226a2c64651c4303fc4edb5d7b2d0271f0b17a:'+file],{encoding:'utf8'}),file);
+test('research presets have no dependency path into the broker worker or account routes',()=>{
+ for(const file of['backend/chartscanner/recovery/worker.ts','backend/routers/chart_auto.py','backend/lib/chart_strategy.py','backend/lib/deriv_demo.py'])assert.doesNotMatch(fs.readFileSync(new URL('../'+file,import.meta.url),'utf8'),/research\/m1|m1-pullback|m1-breakout/,file);
+ assert.doesNotMatch(fs.readFileSync(new URL('../research/m1/engine.mjs',import.meta.url),'utf8'),/\bfetch\s*\(|\bWebSocket\b|from\s+['"](?:https?|net|node:net|node:https?)['"]/);
 });

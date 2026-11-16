@@ -1,0 +1,390 @@
+{
+  "version": "m1-research-v1",
+  "selectedOnValidation": null,
+  "decision": "NO TRADE",
+  "broker_execution_authorized": false,
+  "reason": "No candidate passed the predeclared training/validation criteria",
+  "rows": [
+    {
+      "id": "m1-pullback",
+      "training": {
+        "trades": 555,
+        "wins": 201,
+        "losses": 327,
+        "breakEvenTrades": 27,
+        "winRate": 0.3621621621621622,
+        "net": -14.55,
+        "maxDrawdown": 14.91,
+        "maxLossStreak": 9,
+        "averageWin": 0.08800995024875616,
+        "averageLoss": 0.09859327217125385,
+        "riskReward": 0.8926567534535749,
+        "empiricalBreakEven": 0.5283578219744688,
+        "profitFactor": 0.5486972704714634,
+        "plannedBreakEvenRange": [
+          0.4285714285714285,
+          0.6666666666666666
+        ],
+        "ambiguousBars": 0,
+        "unresolved": [],
+        "rejects": {
+          "missing_quote": 0,
+          "gapped_entry": 0,
+          "provider_exit_limits": 449
+        },
+        "signals": 1069,
+        "maxEquityDrawdownBound": 15,
+        "drawdownMethod": "Conservative favourable-first/adverse-second OHLC bound, including open positions; maxDrawdown is settled equity only",
+        "pricing": "Current public commission/limits scenario; hypothetical OHLC fills, not actual contracts"
+      },
+      "validation": {
+        "trades": 609,
+        "wins": 257,
+        "losses": 335,
+        "breakEvenTrades": 17,
+        "winRate": 0.4220032840722496,
+        "net": -10.95,
+        "maxDrawdown": 11.1,
+        "maxLossStreak": 8,
+        "averageWin": 0.09108949416342416,
+        "averageLoss": 0.10256716417910443,
+        "riskReward": 0.8880960577633035,
+        "empiricalBreakEven": 0.5296340701990717,
+        "profitFactor": 0.6813154831199074,
+        "plannedBreakEvenRange": [
+          0.4305555555555556,
+          0.6666666666666666
+        ],
+        "ambiguousBars": 0,
+        "unresolved": [],
+        "rejects": {
+          "missing_quote": 0,
+          "gapped_entry": 2,
+          "provider_exit_limits": 344
+        },
+        "signals": 1012,
+        "maxEquityDrawdownBound": 11.15,
+        "drawdownMethod": "Conservative favourable-first/adverse-second OHLC bound, including open positions; maxDrawdown is settled equity only",
+        "pricing": "Current public commission/limits scenario; hypothetical OHLC fills, not actual contracts"
+      },
+      "stress": {
+        "trades": 609,
+        "wins": 229,
+        "losses": 369,
+        "breakEvenTrades": 11,
+        "winRate": 0.3760262725779967,
+        "net": -26.1,
+        "maxDrawdown": 26.21,
+        "maxLossStreak": 11,
+        "averageWin": 0.0768995633187772,
+        "averageLoss": 0.11845528455284546,
+        "riskReward": 0.6491864302134249,
+        "empiricalBreakEven": 0.6063595853566341,
+        "profitFactor": 0.4028826355525049,
+        "plannedBreakEvenRange": [
+          0.45833333333333337,
+          0.9333333333333332
+        ],
+        "ambiguousBars": 0,
+        "unresolved": [],
+        "rejects": {
+          "missing_quote": 0,
+          "gapped_entry": 2,
+          "provider_exit_limits": 344
+        },
+        "signals": 1012,
+        "maxEquityDrawdownBound": 26.26,
+        "drawdownMethod": "Conservative favourable-first/adverse-second OHLC bound, including open positions; maxDrawdown is settled equity only",
+        "pricing": "Current public commission/limits scenario; hypothetical OHLC fills, not actual contracts"
+      },
+      "assessment": {
+        "eligible": false,
+        "reasons": [
+          "Training, validation and cost-stress net must all be positive",
+          "Validation drawdown exceeds risk limit",
+          "Not positive in every chronological validation block",
+          "Daily-block net-return lower bound is not positive"
+        ],
+        "lowerBound": -2.145714285714285,
+        "validationDays": 7,
+        "blockNets": [
+          -2.46,
+          -6.23,
+          -2.26
+        ]
+      },
+      "test": {
+        "trades": 529,
+        "wins": 208,
+        "losses": 305,
+        "breakEvenTrades": 16,
+        "winRate": 0.3931947069943289,
+        "net": -11.11,
+        "maxDrawdown": 11.4,
+        "maxLossStreak": 10,
+        "averageWin": 0.10221153846153846,
+        "averageLoss": 0.10613114754098357,
+        "riskReward": 0.963068249328676,
+        "empiricalBreakEven": 0.5094066395001686,
+        "profitFactor": 0.6567809700339823,
+        "plannedBreakEvenRange": [
+          0.4264705882352941,
+          0.6666666666666666
+        ],
+        "ambiguousBars": 0,
+        "unresolved": [],
+        "rejects": {
+          "missing_quote": 0,
+          "gapped_entry": 0,
+          "provider_exit_limits": 380
+        },
+        "signals": 967,
+        "maxEquityDrawdownBound": 11.48,
+        "drawdownMethod": "Conservative favourable-first/adverse-second OHLC bound, including open positions; maxDrawdown is settled equity only",
+        "pricing": "Current public commission/limits scenario; hypothetical OHLC fills, not actual contracts"
+      },
+      "testStress": {
+        "trades": 529,
+        "wins": 186,
+        "losses": 334,
+        "breakEvenTrades": 9,
+        "winRate": 0.3516068052930057,
+        "net": -24.36,
+        "maxDrawdown": 24.56,
+        "maxLossStreak": 14,
+        "averageWin": 0.09021505376344079,
+        "averageLoss": 0.12317365269461075,
+        "riskReward": 0.732421681015781,
+        "empiricalBreakEven": 0.5772266711726121,
+        "profitFactor": 0.40787554691297984,
+        "plannedBreakEvenRange": [
+          0.4603174603174603,
+          0.9333333333333332
+        ],
+        "ambiguousBars": 0,
+        "unresolved": [],
+        "rejects": {
+          "missing_quote": 0,
+          "gapped_entry": 0,
+          "provider_exit_limits": 380
+        },
+        "signals": 967,
+        "maxEquityDrawdownBound": 24.64,
+        "drawdownMethod": "Conservative favourable-first/adverse-second OHLC bound, including open positions; maxDrawdown is settled equity only",
+        "pricing": "Current public commission/limits scenario; hypothetical OHLC fills, not actual contracts"
+      }
+    },
+    {
+      "id": "m1-breakout",
+      "training": {
+        "trades": 849,
+        "wins": 355,
+        "losses": 471,
+        "breakEvenTrades": 23,
+        "winRate": 0.41813898704358066,
+        "net": -21.11,
+        "maxDrawdown": 21.87,
+        "maxLossStreak": 11,
+        "averageWin": 0.08476056338028179,
+        "averageLoss": 0.1087048832271763,
+        "riskReward": 0.7797309639084511,
+        "empiricalBreakEven": 0.5618826779323484,
+        "profitFactor": 0.5876953125000003,
+        "plannedBreakEvenRange": [
+          0.41860465116279066,
+          0.6666666666666666
+        ],
+        "ambiguousBars": 0,
+        "unresolved": [],
+        "rejects": {
+          "missing_quote": 0,
+          "gapped_entry": 0,
+          "provider_exit_limits": 338
+        },
+        "signals": 1316,
+        "maxEquityDrawdownBound": 21.92,
+        "drawdownMethod": "Conservative favourable-first/adverse-second OHLC bound, including open positions; maxDrawdown is settled equity only",
+        "pricing": "Current public commission/limits scenario; hypothetical OHLC fills, not actual contracts"
+      },
+      "validation": {
+        "trades": 903,
+        "wins": 347,
+        "losses": 520,
+        "breakEvenTrades": 36,
+        "winRate": 0.3842746400885936,
+        "net": -22.99,
+        "maxDrawdown": 23.37,
+        "maxLossStreak": 13,
+        "averageWin": 0.08913544668587892,
+        "averageLoss": 0.10369230769230775,
+        "riskReward": 0.8596148419261315,
+        "empiricalBreakEven": 0.5377457618934849,
+        "profitFactor": 0.5736275964391685,
+        "plannedBreakEvenRange": [
+          0.4215686274509804,
+          0.6666666666666666
+        ],
+        "ambiguousBars": 0,
+        "unresolved": [],
+        "rejects": {
+          "missing_quote": 0,
+          "gapped_entry": 0,
+          "provider_exit_limits": 265
+        },
+        "signals": 1291,
+        "maxEquityDrawdownBound": 23.45,
+        "drawdownMethod": "Conservative favourable-first/adverse-second OHLC bound, including open positions; maxDrawdown is settled equity only",
+        "pricing": "Current public commission/limits scenario; hypothetical OHLC fills, not actual contracts"
+      },
+      "stress": {
+        "trades": 903,
+        "wins": 292,
+        "losses": 581,
+        "breakEvenTrades": 30,
+        "winRate": 0.3233665559246955,
+        "net": -47.06,
+        "maxDrawdown": 47.18,
+        "maxLossStreak": 13,
+        "averageWin": 0.07958904109589045,
+        "averageLoss": 0.12099827882960408,
+        "riskReward": 0.6577700266957662,
+        "empiricalBreakEven": 0.6032199785836276,
+        "profitFactor": 0.33058321479374136,
+        "plannedBreakEvenRange": [
+          0.4411764705882353,
+          0.9333333333333332
+        ],
+        "ambiguousBars": 0,
+        "unresolved": [],
+        "rejects": {
+          "missing_quote": 0,
+          "gapped_entry": 0,
+          "provider_exit_limits": 265
+        },
+        "signals": 1291,
+        "maxEquityDrawdownBound": 47.2,
+        "drawdownMethod": "Conservative favourable-first/adverse-second OHLC bound, including open positions; maxDrawdown is settled equity only",
+        "pricing": "Current public commission/limits scenario; hypothetical OHLC fills, not actual contracts"
+      },
+      "assessment": {
+        "eligible": false,
+        "reasons": [
+          "Training, validation and cost-stress net must all be positive",
+          "Validation drawdown exceeds risk limit",
+          "Not positive in every chronological validation block",
+          "Daily-block net-return lower bound is not positive"
+        ],
+        "lowerBound": -4.722857142857143,
+        "validationDays": 7,
+        "blockNets": [
+          -8.1,
+          -7.77,
+          -7.12
+        ]
+      },
+      "test": {
+        "trades": 827,
+        "wins": 333,
+        "losses": 464,
+        "breakEvenTrades": 30,
+        "winRate": 0.4026602176541717,
+        "net": -21.36,
+        "maxDrawdown": 21.84,
+        "maxLossStreak": 11,
+        "averageWin": 0.0866066066066066,
+        "averageLoss": 0.10818965517241386,
+        "riskReward": 0.8005072801885545,
+        "empiricalBreakEven": 0.5553990317080401,
+        "profitFactor": 0.5745019920318721,
+        "plannedBreakEvenRange": [
+          0.4174757281553398,
+          0.6666666666666666
+        ],
+        "ambiguousBars": 0,
+        "unresolved": [],
+        "rejects": {
+          "missing_quote": 0,
+          "gapped_entry": 0,
+          "provider_exit_limits": 252
+        },
+        "signals": 1191,
+        "maxEquityDrawdownBound": 21.91,
+        "drawdownMethod": "Conservative favourable-first/adverse-second OHLC bound, including open positions; maxDrawdown is settled equity only",
+        "pricing": "Current public commission/limits scenario; hypothetical OHLC fills, not actual contracts"
+      },
+      "testStress": {
+        "trades": 827,
+        "wins": 271,
+        "losses": 535,
+        "breakEvenTrades": 21,
+        "winRate": 0.32769044740024184,
+        "net": -43.42,
+        "maxDrawdown": 43.52,
+        "maxLossStreak": 12,
+        "averageWin": 0.07870848708487077,
+        "averageLoss": 0.12102803738317747,
+        "riskReward": 0.6503326732109019,
+        "empiricalBreakEven": 0.6059384366755529,
+        "profitFactor": 0.3294208494208494,
+        "plannedBreakEvenRange": [
+          0.4368932038834951,
+          0.9333333333333332
+        ],
+        "ambiguousBars": 0,
+        "unresolved": [],
+        "rejects": {
+          "missing_quote": 0,
+          "gapped_entry": 0,
+          "provider_exit_limits": 252
+        },
+        "signals": 1191,
+        "maxEquityDrawdownBound": 43.69,
+        "drawdownMethod": "Conservative favourable-first/adverse-second OHLC bound, including open positions; maxDrawdown is settled equity only",
+        "pricing": "Current public commission/limits scenario; hypothetical OHLC fills, not actual contracts"
+      }
+    }
+  ],
+  "provenance": [
+    {
+      "symbol": "R_100",
+      "sha256": "19558ef572c65a72fab0425b82410135cb466071c59fd3f6a0dde145f9bfc184",
+      "bars": 30591,
+      "captured_at": 1794847922,
+      "frozen_commit": "164d2d9027a10707eed48b4c6f45402131782a2a"
+    },
+    {
+      "symbol": "R_25",
+      "sha256": "1d85e4d4a5f576f1b9f71ed253e69535b93eaa2e0fbad5790acfd6962d9f94ab",
+      "bars": 30593,
+      "captured_at": 1794847922,
+      "frozen_commit": "164d2d9027a10707eed48b4c6f45402131782a2a"
+    },
+    {
+      "symbol": "1HZ75V",
+      "sha256": "7a72a3340af38c714747f11d44fa226843d82baa8c3c33d3bae907c26cb1d5c5",
+      "bars": 30593,
+      "captured_at": 1794847922,
+      "frozen_commit": "164d2d9027a10707eed48b4c6f45402131782a2a"
+    },
+    {
+      "symbol": "frxXAUUSD",
+      "sha256": "52605c80298a4754b562a88e652b32aad37ad774c2efcd6196329c263b0b9ee2",
+      "bars": 20321,
+      "captured_at": 1794847948,
+      "frozen_commit": "164d2d9027a10707eed48b4c6f45402131782a2a"
+    },
+    {
+      "symbol": "cryBTCUSD",
+      "sha256": "9ba7e788c0a09b4a7f10e99b861e347d200322a96bd8b25eed425925c2ac3be1",
+      "bars": 30572,
+      "captured_at": 1794847949,
+      "frozen_commit": "164d2d9027a10707eed48b4c6f45402131782a2a"
+    }
+  ],
+  "limitations": [
+    "Previously uninspected historical data, not a prospective forward test or three-month study.",
+    "OHLC cannot verify tick path, bid/ask spread, authenticated fills, contract financing or stop execution. Ambiguous bars use the adverse order.",
+    "Current commission/precision/contract-limit scenarios cannot establish historical executable profit.",
+    "Frequent checks do not promise entries every minute. New presets are not the original PDF strategies."
+  ]
+}
