@@ -1,5 +1,7 @@
 # Original EazyXPro recovery and Deriv integration
 
+**Current automatic mode uses local rules without AI credits.** All original sources below are preserved, but only the documented mechanical subset is executable. See [LOCAL_RULES.md](LOCAL_RULES.md) for exact scope, source timeframes, unsupported discretionary rules and selected-market rotation. The original AI recovery details below are historical context, not a claim that every source is fully automated offline.
+
 This is a review branch, not a deployed or validated profitable trading system.
 Base website commit: `12d5fffeee2fe6edddb03536fd16dfad15fbe93d`.
 Original source: [eazyxpro/eazyxpro at 5dbfdd5](https://github.com/eazyxpro/eazyxpro/tree/5dbfdd5).
@@ -36,7 +38,7 @@ The original heuristic scoring, grades, 3-strategy/8-confirmation high-convictio
 
 Disabled by default, with separate backend Demo and Live flags. The existing OAuth callback, account display, original Demo execution module, sound generator and frozen research remain unchanged. Enabling the new path replaces the visible Digit practice panel with account/market selection, fixed stake, session profit target, total loss limit and Start/Pause/Stop. Real-account execution additionally requires its server flag and an explicit checkbox. Only active authorized **USD Options accounts** and the existing supported volatility markets are accepted.
 
-At the user's request the server now fetches real D1/H4/H1/M15/M5/M1 closed candles, renders all six charts and checks once per new closed M1 candle in scalping mode. The analysis process has a 45-second budget; a setup that becomes stale before an authenticated quote cannot enter. This is a timeframe subset, not a claim that missing weekly/DXY/news charts exist: any strategy requiring unavailable evidence must be unverifiable/WAIT. Indicator-only, context-only, incomplete and conflicting setups cannot force an order. A trade every minute is not guaranteed, and timeframe changes are not evidence of profitability.
+The server fetches real D1/H4/H1/M15/M5/M1 closed OHLC data and checks selected markets once per closed M1 candle. The automatic worker now evaluates local code instead of sending chart images to an AI provider. Source-specific M15/H1 restrictions remain enforced. A setup that becomes stale before an authenticated quote cannot enter. Missing weekly/DXY/news or discretionary evidence must remain unverifiable/WAIT. Indicator-only, context-only, incomplete and conflicting setups cannot force an order. A trade every minute is not guaranteed, and timeframe changes are not evidence of profitability.
 
 Only an immediate original-policy BUY_NOW/SELL_NOW interpretation can be considered. At least two matching entry strategies and a source with explicit exits are required. Entry, invalidation and target anchors must resolve to actual closed OHLC values; model-supplied arbitrary prices are ignored. This anchor representation deliberately cannot execute every possible discretionary zone. A missing representable complete setup means no trade. The lowest provider-listed multiplier is used, not loss recovery. Provider commission, available leverage, two authenticated quotes, exit barriers and settlement determine all monetary amounts. No Digit, Accumulator, fixed-duration option or Martingale execution is added.
 
