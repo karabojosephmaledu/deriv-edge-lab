@@ -536,6 +536,23 @@ def test_forex_session_gaps_do_not_create_weekend_candles():
     assert len(result)==len(raw) and result[10]["epoch"]-result[9]["epoch"]==1800
 
 
+@pytest.mark.parametrize("granularity",list(FRAMES))
+def test_session_history_discards_only_the_leading_partial_candle(granularity):
+    now=time.time();raw=frames(now)[granularity]
+    partial={**raw[0],"epoch":raw[0]["epoch"]+7}
+    result=closed_candles([partial]+raw[1:],granularity,now,allow_gaps=True)
+    assert result==raw[1:]
+    with pytest.raises(DemoError):closed_candles([partial]+raw[1:],granularity,now)
+
+
+def test_session_history_still_rejects_misaligned_interior_candles_and_short_history():
+    now=time.time();raw=frames(now)[900]
+    bad=[dict(b) for b in raw];bad[10]["epoch"]+=7
+    with pytest.raises(DemoError):closed_candles(bad,900,now,allow_gaps=True)
+    short=[{**raw[-60],"epoch":raw[-60]["epoch"]+7}]+raw[-59:]
+    with pytest.raises(DemoError):closed_candles(short,900,now,allow_gaps=True)
+
+
 def test_catalog_does_not_treat_a_listed_index_as_a_multiplier():
     from lib.market_catalog import market_rows
     active=[{"underlying_symbol":"frxXAUUSD","underlying_symbol_name":"Gold","exchange_is_open":1,"is_trading_suspended":0},{"underlying_symbol":"OTC_NDX","underlying_symbol_name":"US Tech 100","exchange_is_open":1,"is_trading_suspended":0}]

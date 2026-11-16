@@ -3,7 +3,7 @@
  * flag and explicit selection. This script never sends Deriv socket orders. */
 "use strict";
 (() => {
-  let cfg=null,run=null,busy=false,polling=false,historyView="session",lastStatusAt=0,pollError=null,statusGeneration=0;
+  let cfg=null,run=null,busy=false,polling=false,historyView="account",lastStatusAt=0,pollError=null,statusGeneration=0;
   let knownRun=null,seenResults=new Set(),resultTimer;
   let marketRows=[],marketsReady=false,marketError=null,selectedSymbols=new Set();
   const el=id=>document.getElementById(id);
@@ -41,7 +41,7 @@
   function receive(next) {
     if(pollError)text("chart-error","");
     run=next;lastStatusAt=Date.now();pollError=null;
-    if(!next || knownRun!==next.id){knownRun=next?.id;seenResults=new Set((next?.history || []).map(r=>r.id));return;}
+    if(!next || knownRun!==next.id){if(knownRun!==next?.id)historyView=next?"session":"account";knownRun=next?.id;seenResults=new Set((next?.history || []).map(r=>r.id));return;}
     for(const row of [...(next.history || [])].reverse()) {
       if(seenResults.has(row.id))continue;seenResults.add(row.id);
       if(!Number.isFinite(row.profit) || row.profit===0)continue;
@@ -84,6 +84,7 @@
     const enabled=Boolean(account && cfg[account.type+"_enabled"] && state.auth==="authorised");
     el("chart-live-choice").hidden=!real;
     el("chart-start").disabled=busy || active || !lastStatusAt || !!pollError || !marketsReady || !selectedSymbols.size || !enabled || !cfg.node_available || !cfg.worker_available || real && !el("chart-live-confirm").checked;
+    el("chart-start").textContent=real?"Start Live trading":"Start Demo trading";
     el("chart-pause").disabled=busy || !run || !["running","paused"].includes(run.status);
     el("chart-pause").textContent=run?.status==="paused"?"Resume":"Pause";
     el("chart-stop").disabled=busy || !run || !["running","paused"].includes(run.status);
@@ -146,8 +147,35 @@
     finally{polling=false;render();}
   }
   async function init() {
-    try{cfg=await request("config");}catch{return;}
-    if(!cfg.enabled)return;
+    const practice=el("matches-testing");practice.hidden=true;
+    window.matchesLab?.setAvailable?.(false);
+    text("mode-badge","Checking Demo controls");
+    const availability=document.createElement("section");availability.className="card";availability.id="chart-availability";
+    availability.innerHTML='<div class="card-kicker">Deriv Demo controls</div><p class="hint" id="chart-availability-status" role="status">Checking genuine Demo trading controls… Practice entries are suspended.</p><button class="btn btn-outline btn-sm" id="chart-retry" type="button" hidden>Retry Demo controls</button>';
+    practice.after(availability);
+    let retrying=false,retryTimer=null,retryDelay=2000;
+    async function load(){
+      if(retrying)return;
+      retrying=true;clearTimeout(retryTimer);el("chart-retry").disabled=true;
+      let next;
+      try{
+        next=await request("config");
+        if(!next||typeof next.enabled!=="boolean")throw new Error("The backend did not return valid trading settings.");
+      }catch{
+        text("mode-badge","Demo controls unavailable");
+        text("chart-availability-status","Genuine Demo controls could not load. Retrying automatically; practice profits do not change your Deriv balance.");
+        el("chart-retry").hidden=false;el("chart-retry").disabled=false;
+        retryTimer=setTimeout(load,retryDelay);retryDelay=Math.min(30000,retryDelay*2);
+        return;
+      }finally{retrying=false;}
+      cfg=next;availability.remove();
+      if(!cfg.enabled){practice.hidden=false;window.matchesLab?.setAvailable?.(true);text("mode-badge","Practice · account view");return;}
+      mount();
+    }
+    el("chart-retry").addEventListener("click",()=>{void load();});
+    void load();
+  }
+  function mount() {
     const section=document.createElement("section");section.className="card";section.id="chart-testing";section.style.position="relative";
     section.innerHTML=`
       <div class="card-kicker">Local chart rules · no AI credits</div>

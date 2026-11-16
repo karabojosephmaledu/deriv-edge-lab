@@ -17,7 +17,11 @@ before(async()=>{
   const send=(code,data)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store, private'});res.end(JSON.stringify(data));};
   if(url.pathname.startsWith('/api/deriv/')){
    model.calls.push({path:url.pathname,method:req.method,body,selected:url.searchParams.get('account_id')});
-   if(url.pathname==='/api/deriv/chart/config')return send(200,{enabled:model.chartEnabled,demo_enabled:true,real_enabled:true,ai_configured:!model.aiMissing,ai_required:false,analysis_engine:'local_rules',node_available:true,worker_available:!model.workerMissing});
+   if(url.pathname==='/api/deriv/chart/config'){
+    if(model.configFailures>0){model.configFailures--;return send(503,{detail:'Backend waking'});}
+    if(model.invalidConfig)return send(200,{detail:'Invalid settings'});
+    return send(200,{enabled:model.chartEnabled,demo_enabled:true,real_enabled:true,ai_configured:!model.aiMissing,ai_required:false,analysis_engine:'local_rules',node_available:true,worker_available:!model.workerMissing});
+   }
    if(url.pathname==='/api/deriv/chart/markets')return send(200,{markets:[{symbol:'R_100',name:'Volatility 100 Index',supported:true,open:true},{symbol:'R_25',name:'Volatility 25 Index',supported:true,open:true},{symbol:'frxXAUUSD',name:'Gold / USD',supported:true,open:true},{symbol:'cryBTCUSD',name:'Bitcoin / USD',supported:true,open:true},{symbol:'OTC_NDX',name:'NAS100',supported:false,open:true}]});
    if(url.pathname.startsWith('/api/deriv/chart/')) {
     if(!model.connected)return send(401,{detail:'Sign in'});
@@ -43,8 +47,8 @@ before(async()=>{
  browser=await chromium.launch({headless:true,executablePath:'/usr/bin/chromium'});
 });
 after(async()=>{await browser?.close();if(server)await new Promise(r=>server.close(r));});
-async function open(t,{mobile=false,login=true,oauth=false,enabled=true}={}){
- model=fresh();model.chartEnabled=enabled;
+async function open(t,{mobile=false,login=true,oauth=false,enabled=true,configFailures=0,invalidConfig=false}={}){
+ model=fresh();model.chartEnabled=enabled;model.configFailures=configFailures;model.invalidConfig=invalidConfig;
  const context=await browser.newContext({viewport:mobile?{width:390,height:844}:{width:1440,height:1000}});t.after(()=>context.close());
  await context.route('**/*',r=>new URL(r.request().url()).origin===origin?r.continue():r.abort());
  await context.addInitScript(({oauth})=>{
@@ -212,4 +216,48 @@ test('market checks explain missing rules and show source-close times without pl
  assert.match(await page.locator('#chart-market-results').textContent(),/Volatility 100.*raid and close-back.*H1 close/);
  assert.equal(model.run.pending,null);assert.equal(model.run.history.length,0);
  assert.equal(model.calls.filter(c=>c.path.endsWith('/chart/start')).length,1);
+});
+
+test('a waking backend retries Demo controls instead of silently presenting working practice',{timeout:20000},async t=>{
+ const page=await open(t,{configFailures:2});
+ await page.waitForSelector('#chart-availability');
+ assert.equal(await page.locator('#matches-testing').isVisible(),false);
+ assert.equal(await page.locator('#matches-start').isDisabled(),true);
+ assert.match(await page.locator('#chart-availability-status').innerText(),/Retrying automatically/);
+ await page.waitForFunction(()=>document.getElementById('chart-start')?.disabled===false);
+ assert.equal(await page.locator('#chart-start').innerText(),'Start Demo trading');
+ assert.equal(await page.locator('#chart-availability').count(),0);
+ assert.equal(model.calls.some(c=>c.path.endsWith('/chart/start')),false);
+ assert.equal(await page.locator('#matches-testing').isVisible(),false);
+});
+
+test('invalid settings retain an explicit error and manual retry can recover without duplicate panels',{timeout:15000},async t=>{
+ const page=await open(t,{invalidConfig:true});
+ await page.waitForSelector('#chart-retry');assert.equal(await page.locator('#matches-start').isDisabled(),true);
+ assert.equal(await page.locator('#chart-testing').count(),0);
+ model.invalidConfig=false;await page.locator('#chart-retry').click();
+ await page.waitForFunction(()=>document.getElementById('chart-start')?.disabled===false);
+ assert.equal(await page.locator('#chart-testing').count(),1);
+ assert.equal(model.calls.some(c=>c.path.endsWith('/chart/start')),false);
+});
+
+test('suspended practice cannot unlock the actual session market or produce practice results',{timeout:15000},async t=>{
+ const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);
+ await page.locator('#chart-start').click();await page.waitForFunction(()=>document.getElementById('chart-pause').disabled===false);
+ await page.evaluate(()=>{window.matchesLab.render();document.getElementById('matches-start').click();window.__tick();});
+ assert.equal(await page.locator('#symbol-select').isDisabled(),true);
+ assert.equal(await page.evaluate(()=>window.matchesLab.engine),null);
+ assert.equal(await page.evaluate(()=>window.__requests.some(q=>q.proposal===1)),false);
+ assert.equal(model.calls.filter(c=>c.path.endsWith('/chart/start')).length,1);
+});
+
+test('genuine account trade history is visible by default before a bot session starts',{timeout:15000},async t=>{
+ const page=await open(t);await page.waitForSelector('#chart-testing');
+ model.contracts=[{id:'genuine-settlement',contract_id:654321,time:1001,stake:2,profit:-.4,return:1.6}];
+ await page.locator('#account-refresh').click();await page.waitForFunction(()=>!state.checking);
+ await page.waitForFunction(()=>document.getElementById('chart-history').textContent.includes('654321'));
+ assert.match(await page.locator('#chart-history').innerText(),/654321.*\$2\.00.*-\$0\.40.*LOSS/s);
+ assert.equal(await page.locator('#chart-history-account').getAttribute('aria-pressed'),'true');
+ assert.equal(await page.locator('#chart-pnl').innerText(),'$0.00');
+ assert.equal(model.calls.some(c=>c.path.endsWith('/chart/start')),false);
 });

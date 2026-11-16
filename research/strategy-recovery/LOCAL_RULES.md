@@ -25,6 +25,8 @@ The four counted events are the daily key level, separate source-frame CRT range
 
 The public catalog verifies `active_symbols` and **both** `MULTUP` and `MULTDOWN` from `contracts_for`. The watchlist is frozen for a session. Closed/unsupported markets are skipped, candidates are checked in rotating order, and there is only one actual contract at a time. Account authorization and an authenticated quote remain mandatory before every buy. A different symbol cannot reuse another market's tick, candles, setup, result or order identifier. Higher-timeframe histories are cached until their next close; stale M1 data still blocks entry. Legitimate forex/metal session gaps are retained without filling weekend candles.
 
+Session-market history may begin with an off-grid partial candle at Deriv's requested-window start. The validator discards only that first partial observation after validating its fields; it never rounds it into a full candle. Interior misalignment, duplicates, invalid prices, stale data and too few remaining closed candles still fail. A public Gold check reproduced this leading partial on D1/H4/H1/M15 and successfully validated all six frames after discarding it. History failures now retain the timeframe/reason instead of reporting only a generic unavailable message.
+
 Read-only provider checks returned Multiplier contracts for XAUUSD, BTCUSD, EURUSD, GBPUSD, USDJPY and the existing volatility markets. NAS100 (`OTC_NDX`), US30 (`OTC_DJI`), UK100 (`OTC_FTSE`) and HK50 (`OTC_HSI`) returned no Multiplier contracts and are shown disabled. These are current public capabilities, not proof of availability for every authorized account. The bot does not silently switch to MT5/CFDs or enable Live execution.
 
 ## Validation and limits

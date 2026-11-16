@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const M=MatchesSimulation, KEY='del.matches.auto.v1';
-  let engine=null, quote=null, quoting=false, generation=0, uiError=null, lastPrice=null;
+  let engine=null, quote=null, quoting=false, generation=0, uiError=null, lastPrice=null, available=true;
   let observations=new Map(), precision=null, historyGeneration=0, historyPending=false, historyAttempted=false;
   const active=()=>engine&&(['running','paused','stopping'].includes(engine.status)||!!engine.pending);
   const ready=()=>state.feed==='live'&&state.pub?.isOpen()&&state.lastEpoch>0&&Date.now()-state.lastTickAt<5000;
@@ -29,11 +29,11 @@
   }
   function render(){
     const e=engine,locked=!!active();
-    for(const id of ['matches-stake','matches-target','matches-loss'])$(id).disabled=locked;
-    $('symbol-select').disabled=locked;
-    $('matches-start').disabled=!!(e?.status==='running'||e?.status==='stopping'||e?.pending&&e.status!=='paused'||!ready());
+    for(const id of ['matches-stake','matches-target','matches-loss'])$(id).disabled=locked||!available;
+    if(available)$('symbol-select').disabled=locked;
+    $('matches-start').disabled=!!(!available||e?.status==='running'||e?.status==='stopping'||e?.pending&&e.status!=='paused'||!ready());
     $('matches-start').textContent=e?.status==='paused'?'Resume':e?.status==='done'?'New session':'Start';
-    $('matches-pause').disabled=e?.status!=='running';$('matches-stop').disabled=!locked;
+    $('matches-pause').disabled=!available||e?.status!=='running';$('matches-stop').disabled=!available||!locked;
     $('matches-status').textContent=uiError||shortReason();
     const digit=e?.pending?.digit??quote?.digit??(e?.status==='running'?signal()?.digit:null);
     $('matches-auto-digit').textContent=digit==null?'Digit selection: automatic':'Automatic digit: '+digit;
@@ -84,6 +84,7 @@
     finally{if(gen===generation){quoting=false;render();}}
   }
   function feed(t){
+    if(!available)return;
     observe(t);void ensureHistory();
     if(!engine){render();return;}
     const event=engine.feed(t,quote);
@@ -102,7 +103,7 @@
     render();
   }
   function start(){
-    unlockAudio();if(!ready())return;uiError=null;
+    unlockAudio();if(!available||!ready())return;uiError=null;
     try{
       if(!engine||engine.status==='done'||engine.status==='idle'){engine=new M.Engine(config());engine.lastEpoch=state.lastEpoch;lastPrice=null;}
       engine.start();cancelQuote();render();save();
@@ -118,7 +119,7 @@
   $('matches-start').addEventListener('click',start);
   $('matches-pause').addEventListener('click',()=>{if(engine){engine.pause();cancelQuote();save();render();}});
   $('matches-stop').addEventListener('click',()=>{if(engine){engine.stop();cancelQuote();save();render();}});
-  window.matchesLab={feed,interrupt,render,get engine(){return engine;},get quote(){return quote;}};
+  window.matchesLab={feed,interrupt,render,setAvailable(value){available=Boolean(value);if(!available)interrupt('Practice stopped while genuine account controls are selected');render();},get engine(){return engine;},get quote(){return quote;}};
   render();
   setInterval(()=>{if(active()&&state.lastTickAt&&Date.now()-state.lastTickAt>10000)interrupt('No fresh live ticks · open result unresolved');else render();},1000);
 })();

@@ -268,7 +268,8 @@ class Runtime:
             try:response=await r.channel.request({"ticks_history":r.symbol,"end":"latest","style":"candles","granularity":g,"count":161})
             except DemoError as exc:raise DemoError("Could not load "+FRAMES[g]+" market history. "+str(exc),exc.status) from None
             gaps=r.market_info.get(r.symbol,{}).get("market") in {"forex","commodities","indices"}
-            frames[g]=closed_candles(response.get("candles"),g,time.time(),allow_gaps=gaps)
+            try:frames[g]=closed_candles(response.get("candles"),g,time.time(),allow_gaps=gaps)
+            except DemoError as exc:raise DemoError(FRAMES[g]+" closed history: "+str(exc),exc.status) from None
             r.frame_cache[r.symbol,g]=frames[g]
             r.frame_boundaries[r.symbol,g]=boundary
         return frames
@@ -393,7 +394,8 @@ class Runtime:
                                 frames=await asyncio.wait_for(self.frames(r),12)
                             except (DemoError,TimeoutError) as exc:
                                 if isinstance(exc,DemoError) and exc.status in {401,403} or r.status!="running":raise
-                                r.market_status[symbol]={"symbol":symbol,"name":info.get("name",symbol),"verdict":"WAIT","note":"Closed market history unavailable; no entry.","checked_at":time.time()};continue
+                                reason=str(exc) if isinstance(exc,DemoError) else "History request timed out."
+                                r.market_status[symbol]={"symbol":symbol,"name":info.get("name",symbol),"verdict":"WAIT","note":"Closed market history unavailable; no entry. "+reason,"checked_at":time.time()};continue
                             r.last_bar=frames[ENTRY_FRAME][-1]["epoch"]
                             r.checked_bars[symbol]=r.last_bar
                             r.activity("analysing","Checking local rules on "+info.get("name",symbol)+". No AI credits used.");await self.save(r)

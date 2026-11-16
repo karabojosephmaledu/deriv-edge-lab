@@ -40,3 +40,11 @@ Existing account/OAuth code, provider quotes, payout/commission calculations, bu
 Validation: 46 scanner tests, 77 automatic-session backend tests and 15 browser tests passed (138 relevant tests total), including five new regression cases. TypeScript worker type-check and `git diff --check` passed. The historical benchmark suites were not repeated because no benchmark/simulation formulas changed. Browser tests use controlled data and forbid actual broker orders; they do not verify a private live account session.
 
 A separate M1 strategy would require an explicit mechanical definition and virtual evaluation before any Demo execution connection. It cannot be described as the unchanged original M15/H1 strategy or promised to trade every minute or grow an account.
+
+## Release integration and Gold history correction
+
+This correction was integrated through a normal merge with the already deployed PR #20 UI recovery, preserving that change's genuine history default, config retries and practice isolation. The combined branch passed **149 relevant tests**: 46 scanner, 84 backend and 19 browser tests. Broker purchase/quote/settlement code and source entry timeframes remain unchanged.
+
+A separate public Gold probe found that its D1/H4/H1/M15 responses each began with one partial candle whose epoch was not aligned to that timeframe. The prior validator rejected the entire response. Session-market validation now discards only a validated leading off-grid partial, preserving the remaining closed observations. It still rejects interior misalignment, duplicates, bad OHLC, stale data or fewer than 60 valid remaining bars. No candle is rounded or fabricated. The six-frame public Gold → Python validation → local Node scanner smoke check completes without an authenticated connection or broker orders. Source-frame history errors retain their actual validation reason in the per-market display.
+
+These are corrections to blocked/opaque checks, not a new aggressive trading strategy. The earlier zero-signal replay remains a limitation; M15/H1 pattern selectivity still applies after deployment. The separate M1 research in PR #19 failed its criteria and is not connected to execution.
