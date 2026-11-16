@@ -21,7 +21,7 @@ before(async()=>{
    if(url.pathname.startsWith('/api/deriv/chart/')) {
     if(!model.connected)return send(401,{detail:'Sign in'});
     if(req.method==='POST' && req.headers['x-deriv-csrf']!=='mock-csrf')return send(403,{detail:'CSRF failed'});
-    if(url.pathname.endsWith('/status'))return send(200,{run:model.run});
+    if(url.pathname.endsWith('/status'))return model.statusError?send(503,{detail:'Status temporarily unavailable'}):send(200,{run:model.run});
     if(url.pathname.endsWith('/start')){model.run={id:'controlled-run',...body,status:'running',net:0,wins:0,losses:0,settled:0,history:[],note:'WAIT — original strategy checks',pending:null};return send(200,model.run);}
     if(url.pathname.endsWith('/control')){model.run.status=body.action==='pause'?'paused':body.action==='resume'?'running':'stopped';return send(200,model.run);}
    }
@@ -126,4 +126,54 @@ test('a missing server worker cannot display a ready Start button',{timeout:1500
  await page.reload();await page.waitForFunction(()=>state.auth==='authorised'&&!state.checking);
  await page.waitForFunction(()=>document.getElementById('chart-status')?.textContent.includes('scanner is missing'));
  assert.equal(await page.locator('#chart-start').isDisabled(),true);assert.equal(model.run,null);
+});
+
+test('activity distinguishes analysis, waiting, an acknowledged contract and an error',{timeout:20000},async t=>{
+ const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-start').click();
+ model.run.phase='analysing';model.run.phase_at=Date.now()/1000;
+ await page.waitForFunction(()=>document.getElementById('chart-session-state').textContent.includes('analysing charts'));
+ assert.match(await page.locator('#chart-history').innerText(),/No settled bot trades/);
+ model.run.phase='waiting';model.run.last_check_at=Date.now()/1000;model.run.next_check_at=Date.now()/1000+60;
+ await page.waitForFunction(()=>document.getElementById('chart-session-state').textContent.includes('waiting for a valid setup'));
+ model.run.pending={contract_id:123,status:'open',profit:-.04};model.run.phase='contract_open';
+ await page.waitForFunction(()=>document.getElementById('chart-session-state').textContent.includes('CONTRACT OPEN'));
+ assert.match(await page.locator('#chart-contract').innerText(),/123.*unsettled P\/L/);
+ model.run.pending=null;model.run.status='stopped';model.run.phase='error';model.run.error='AI analysis unavailable — slot 1 (gemini): provider quota or rate limit reached. No new order was authorized.';
+ await page.waitForFunction(()=>document.getElementById('chart-session-state').textContent.includes('STOPPED'));
+ assert.match(await page.locator('#chart-status').innerText(),/slot 1.*quota/);assert.equal(await page.locator('#chart-wins').innerText(),'0');
+ assert.equal(model.calls.filter(c=>c.path.endsWith('/chart/start')).length,1);
+});
+
+test('visible Deriv account history uses genuine rows without adding them to bot session P/L',{timeout:15000},async t=>{
+ const page=await open(t);await page.waitForSelector('#chart-testing');
+ model.contracts=[{id:'provider-row',contract_id:'provider-123',time:1001,stake:1,profit:1.25,return:2.25}];
+ await page.locator('#account-refresh').click();await page.waitForFunction(()=>!state.checking);
+ await page.locator('#chart-history-account').click();
+ assert.match(await page.locator('#chart-history').innerText(),/provider-123.*\$1\.00.*\+\$1\.25.*WIN/s);
+ assert.match(await page.locator('#chart-history-note').innerText(),/includes trades placed elsewhere/);
+ assert.equal(await page.locator('#chart-pnl').innerText(),'$0.00');
+ await page.locator('#chart-history-session').click();assert.match(await page.locator('#chart-history').innerText(),/No settled bot trades/);
+});
+
+test('actual session settlements play the preserved sound once and never replay on reload',{timeout:15000},async t=>{
+ const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-start').click();
+ model.run.history=[{id:'settled-one',contract_id:321,closed_at:1001,stake:1,profit:.25,status:'win'}];model.run.wins=1;model.run.settled=1;model.run.win_rate=1;model.run.net=.25;
+ await page.waitForFunction(()=>document.getElementById('chart-wins').textContent==='1');
+ assert.deepEqual(await page.evaluate(()=>window.__notes.slice(-2)),[880,1318.5]);
+ await page.reload();await page.waitForFunction(()=>document.getElementById('chart-wins')?.textContent==='1');
+ assert.deepEqual(await page.evaluate(()=>window.__notes),[]);
+});
+
+test('failed status polling reports unknown activity without pretending a running bot stopped',{timeout:15000},async t=>{
+ const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-start').click();model.statusError=true;
+ await page.waitForFunction(()=>document.getElementById('chart-session-state').textContent.includes('STATUS UNAVAILABLE'));
+ assert.equal(model.run.status,'running');assert.match(await page.locator('#chart-error').innerText(),/may still be active/);
+ assert.equal(model.calls.filter(c=>c.path.endsWith('/chart/start')).length,1);
+});
+
+test('active session rejects account changes even if the account refresher briefly enables its selector',{timeout:15000},async t=>{
+ const page=await open(t);await page.waitForFunction(()=>!document.getElementById('chart-start').disabled);await page.locator('#chart-start').click();
+ await page.evaluate(()=>{document.getElementById('account-select').disabled=false;});await page.locator('#account-select').selectOption('ROT-test');
+ assert.equal(await page.locator('#account-select').inputValue(),'DOT-test');assert.equal(model.run.account_id,'DOT-test');
+ assert.match(await page.locator('#chart-error').innerText(),/Stop the current session/);
 });

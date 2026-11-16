@@ -15,8 +15,33 @@ import time
 
 from lib.deriv_demo import DemoError, amount
 
-FRAMES = {86400: "D1", 14400: "H4", 3600: "H1", 900: "M15"}
+FRAMES = {86400: "D1", 14400: "H4", 3600: "H1", 900: "M15", 300: "M5", 60: "M1"}
+ENTRY_FRAME = 60
+SCAN_TIMEOUT = 45
 WORKER = Path(__file__).resolve().parents[1] / "chartscanner/recovery/worker.ts"
+
+AI_REASONS={"credentials":"API key or provider permissions rejected", "credits":"provider credits or billing unavailable",
+    "quota_or_rate_limit":"provider quota or rate limit reached", "model_unavailable":"model unavailable",
+    "request_rejected":"provider rejected the image/context request", "provider_unavailable":"provider unavailable",
+    "output_limit":"model output limit reached", "empty_response":"model returned no readable answer",
+    "no_vision_model":"no image-capable model found", "vision_probe_failed":"image-reading check failed",
+    "invalid_json":"model returned invalid JSON", "timeout":"provider timed out", "network":"provider network request failed"}
+
+
+class AnalysisFailure(DemoError):
+    def __init__(self,code,details=None):
+        self.code=code if code in {"ai_unavailable","analysis_failed","analysis_timeout","worker_failed"} else "worker_failed"
+        self.details=[]
+        for row in details if isinstance(details,list) else []:
+            if isinstance(row,dict) and type(row.get("slot")) is int and 1<=row["slot"]<=6 and row.get("provider") in {"openai","gemini","openrouter"} and row.get("reason") in AI_REASONS:
+                clean={k:row[k] for k in ("slot","provider","reason")}
+                if clean not in self.details:self.details.append(clean)
+        text="; ".join(f"slot {r['slot']} ({r['provider']}): {AI_REASONS[r['reason']]}" for r in self.details[:6])
+        message=("AI analysis unavailable — "+text if text else
+            "AI analysis exceeded the 45-second scalping budget." if self.code=="analysis_timeout" else
+            "AI analysis could not return a verified chart result. Check the configured vision models." if self.code in {"ai_unavailable","analysis_failed"} else
+            "The backend scanner could not run. Check its Node runtime and deployment.")
+        super().__init__(message+" No new order was authorized.",503)
 
 
 @lru_cache(maxsize=4)
@@ -100,7 +125,7 @@ async def scan(symbol, frames, prior=None):
     ready=runtime_status()
     if not ready["node_available"] or not ready["worker_available"] or not any(os.environ.get(f"CHART_AI_SLOT_{i}_API_KEY") for i in range(1,7)):
         raise DemoError("Configure the server's AI vision slots and Node 24 before automatic analysis.", 503)
-    context = {"product":"Deriv Options Multipliers", "symbol":symbol,
+    context = {"product":"Deriv Options Multipliers", "symbol":symbol,"mode":"scalping",
         "closed_candles":{str(g):bars for g,bars in frames.items()},
         "execution_format":"For a currently valid immediate entry only, optionally supply multiplier_plan with direction BUY/SELL and four anchors: entry_low, entry_high, stop_anchor, target_anchor. Each anchor is {granularity,epoch,field}, with field open/high/low/close from the supplied ACTUAL closed candles. Entry bounds describe the documented retest zone. Stop anchor is the invalidation extreme; execution places its stop one price increment beyond it. Target anchor is the opposite documented zone/liquidity. Supply source_strategy_ids and source_pages. Do not choose arbitrary anchors to fill gaps: if the source does not define a protective stop, target or complete entry, return WAIT and multiplier_plan:null. Never transplant PDF example prices. Evaluate every strategy first. No prediction or score alone authorizes an order."}
     images=await asyncio.to_thread(lambda:[render_chart(symbol,g,bars) for g,bars in frames.items()])
@@ -108,19 +133,23 @@ async def scan(symbol, frames, prior=None):
     process=await asyncio.create_subprocess_exec(node,str(WORKER),stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL)
     try:
-        stdout,_=await asyncio.wait_for(process.communicate(payload),180)
-    except BaseException:
+        stdout,_=await asyncio.wait_for(process.communicate(payload),SCAN_TIMEOUT)
+    except BaseException as exc:
         with contextlib.suppress(ProcessLookupError): process.kill()
         await process.wait()
+        if isinstance(exc,TimeoutError):raise AnalysisFailure("analysis_timeout") from None
         raise
     if len(stdout)>1_000_000:
         raise DemoError("The analysis response exceeded its limit.",502)
     try:
         data=json.loads(stdout)
-        if process.returncode or data.get("ok") is not True or not isinstance(data.get("result"),dict): raise ValueError
+        if not isinstance(data,dict):raise ValueError
+        if process.returncode or data.get("ok") is not True:
+            raise AnalysisFailure(data.get("error_code"),data.get("attempts"))
+        if not isinstance(data.get("result"),dict):raise ValueError
         return data["result"]
     except (ValueError,TypeError):
-        raise DemoError("The recovered scanner could not verify an analysis. No order was made.",502) from None
+        raise AnalysisFailure("worker_failed") from None
 
 
 def anchor(value, frames):

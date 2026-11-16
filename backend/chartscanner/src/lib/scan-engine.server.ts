@@ -10,15 +10,19 @@
 import { SYSTEM_PROMPT, buildStrategyCorpus } from "./analyzer-prompt.server.ts";
 import { STRATEGY_LIBRARY } from "./strategy-library.server.ts";
 import { applyScanPolicy } from "./scan-policy.server.ts";
+import { VisionSlotsError, type SlotAttempt } from "./vision-slots.server.ts";
 
 export type ScanImage = { dataUrl: string; mime?: string };
 export type TradingMode = "auto" | "scalping" | "day" | "swing";
 
 export class ScanEngineError extends Error {
   status: number;
-  constructor(message: string, status = 500) {
+  readonly code:string;
+  readonly attempts:SlotAttempt[];
+  constructor(message: string, status = 500, code="analysis_failed", attempts:SlotAttempt[]=[]) {
     super(message);
     this.status = status;
+    this.code=code;this.attempts=attempts;
   }
 }
 
@@ -54,6 +58,7 @@ export function normalizeResult(parsed: Record<string, unknown>, imageCount?: nu
 
 /** Turns provider exceptions into a single, user-readable ScanEngineError. */
 function toEngineError(e: unknown): ScanEngineError {
+  if(e instanceof VisionSlotsError) return new ScanEngineError("No AI vision slot completed the chart analysis.",503,'ai_unavailable',e.attempts);
   if ((e as Error)?.name === "AiUnavailableError") {
     return new ScanEngineError(
       "The analysis engine is unreachable right now. Check the AI provider slots in AI Management.",
