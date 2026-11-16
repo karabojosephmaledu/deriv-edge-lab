@@ -558,3 +558,17 @@ async def test_minute_rollover_while_loading_does_not_recheck_the_same_actual_ba
     await rt.loop(r)
     assert len(reads)==1
     assert r.checked_bars["R_100"]==int(clock[0])//60*60-60
+
+
+@pytest.mark.asyncio
+async def test_wait_diagnostics_survive_rotation_without_calling_trade_entry(monkeypatch):
+    rt,s,r=setup();original=asyncio.sleep
+    async def read_frames(*args):return frames()
+    async def check(*args):return {"verdict":"NO_STRATEGY_MATCH","wait_summary":"WAIT — original M15/H1 source candle has not closed.","local_diagnostics":[{"timeframe":"M15","reason":"waiting_for_source_close","next_source_close":time.time()+60}]}
+    async def forbidden(*args):raise AssertionError("A WAIT result must not run the trade entry pipeline")
+    async def stop(delay):r.status="stopped";await original(0)
+    rt.frames=read_frames;rt.analyze=check;rt.entry=forbidden;monkeypatch.setattr(chart_auto.asyncio,"sleep",stop)
+    await rt.loop(r)
+    row=r.public()["markets"][0]
+    assert "M15/H1" in row["note"] and row["rule_checks"][0]["reason"]=="waiting_for_source_close"
+    assert row["verdict"]=="WAIT" and not r.history and not r.pending

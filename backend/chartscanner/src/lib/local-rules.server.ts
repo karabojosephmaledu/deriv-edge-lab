@@ -20,7 +20,7 @@ export function localScan(symbol:string,data:Record<string,Bar[]>) {
   ['candle-range-theory','giant-killer'].includes(s.id)?'The documented previous-day raid/reversal pattern is not confirmed.':'Preserved source; its discretionary criteria are not fully specified as executable local rules.']}));
  const base:any={pair:symbol,analysis_method:'local_ohlc_rules',verdict:'WAIT',chart_readable:valid,structure_clear:false,consolidating:true,awaiting_confirmation:true,
   needs_more_timeframes:false,chart_images:frames.map((g,i)=>({image_index:i+1,symbol,timeframe:labels[g],readable:valid,bias:valid?direction(data[g]):'UNKNOWN'})),
-  strategy_evaluations:evaluations,evidence:[],warnings:['Local mechanical subset, not an exact replacement for every discretionary PDF interpretation. No AI credits are used.'],multiplier_plan:null};
+  strategy_evaluations:evaluations,evidence:[],local_diagnostics:[],wait_summary:'WAIT — original M15/H1 pattern not complete.',warnings:['Local mechanical subset, not an exact replacement for every discretionary PDF interpretation. No AI credits are used.'],multiplier_plan:null};
  if(!valid)return finish(base);
  const day=data[86400].at(-1)!;
  // Giant Killer expressly restricts its patterns to M15/H1. Do not invent an
@@ -28,14 +28,24 @@ export function localScan(symbol:string,data:Record<string,Bar[]>) {
  for(const g of [900,3600]) {
   if(data[g].length<5)continue;
   const [range,raid,a,b,c]=data[g].slice(-5),lastMinute=data[60].at(-1)!;
-  if(c.epoch+g!==lastMinute.epoch+60 || raid.epoch<day.epoch+86400)continue;
-  const bull=range.low===day.low && raid.low<range.low && raid.close>range.low && raid.close<range.high && [a,b,c].every(x=>x.close>x.open) && c.close>raid.high && c.high<range.high && direction([a,b,c])==='BUY';
-  const bear=range.high===day.high && raid.high>range.high && raid.close<range.high && raid.close>range.low && [a,b,c].every(x=>x.close<x.open) && c.close<raid.low && c.low>range.low && direction([a,b,c])==='SELL';
+  if(c.epoch+g!==lastMinute.epoch+60) {
+   base.local_diagnostics.push({timeframe:labels[g],reason:'waiting_for_source_close',next_source_close:Math.floor((lastMinute.epoch+60)/g)*g+g});continue;
+  }
+  if(raid.epoch<day.epoch+86400){base.local_diagnostics.push({timeframe:labels[g],reason:'previous_day_context_not_ready'});continue;}
+  // Touching/testing a level includes crossing it and closing on the valid
+  // side. Exact OHLC equality was an extra restriction, not a PDF requirement.
+  const support=range.low<=day.low && range.close>day.low;
+  const resistance=range.high>=day.high && range.close<day.high;
+  const bullRaid=support && raid.low<range.low && raid.close>day.low && raid.close<range.high;
+  const bearRaid=resistance && raid.high>range.high && raid.close<day.high && raid.close>range.low;
+  const bull=bullRaid && [a,b,c].every(x=>x.close>x.open) && c.close>raid.high && c.high<range.high && direction([a,b,c])==='BUY';
+  const bear=bearRaid && [a,b,c].every(x=>x.close<x.open) && c.close<raid.low && c.low>range.low && direction([a,b,c])==='SELL';
+  base.local_diagnostics.push({timeframe:labels[g],reason:!support&&!resistance?'prior_day_level_not_tested':!bullRaid&&!bearRaid?'raid_and_close_back_missing':!bull&&!bear?'reversal_or_structure_confirmation_missing':'pattern_confirmed'});
   if(!bull&&!bear)continue;
   const side=bull?'BUY':'SELL',index=frames.indexOf(g)+1;
   const evidence=[
    {id:'day-range',chart_event_id:'D1:'+day.epoch,kind:'pattern',status:'confirmed',observation:'Previous closed trading-day high/low range is present.',image_index:1,timeframe:'D1',sources:[{strategy_id:'candle-range-theory',page:4}]},
-   {id:'crt-range',chart_event_id:labels[g]+':'+range.epoch,kind:'pattern',status:'confirmed',observation:'A closed CRT range candle touched the exact previous-day extreme.',image_index:index,timeframe:labels[g],sources:[{strategy_id:'candle-range-theory',page:bull?2:3}]},
+   {id:'crt-range',chart_event_id:labels[g]+':'+range.epoch,kind:'pattern',status:'confirmed',observation:'A closed CRT range candle tested the previous-day extreme and closed on the valid side.',image_index:index,timeframe:labels[g],sources:[{strategy_id:'candle-range-theory',page:bull?2:3}]},
    {id:'raid',chart_event_id:labels[g]+':'+raid.epoch,kind:'liquidity_sweep',status:'confirmed',observation:'Price raided the previous-day extreme and closed back inside.',image_index:index,timeframe:labels[g],sources:[{strategy_id:'candle-range-theory',page:bull?2:3},{strategy_id:'giant-killer',page:bull?19:17}]},
    {id:'confirmation',chart_event_id:labels[g]+':'+c.epoch,kind:'body_close_bos',status:'confirmed',candle_closed:true,body_close_confirmed:true,observation:'Three opposite-colour candles reversed the raid; the final body closed beyond its opposite extreme.',image_index:index,timeframe:labels[g],sources:[{strategy_id:'candle-range-theory',page:bull?2:3},{strategy_id:'giant-killer',page:bull?19:17}]}];
   for(const e of evaluations)if(['candle-range-theory','giant-killer'].includes(e.strategy_id))Object.assign(e,{status:'match',direction:side,source_pages:e.strategy_id==='giant-killer'?[bull?19:17]:[bull?2:3,4],evidence_ids:evidence.map(x=>x.id),missing_conditions:[]});
@@ -44,5 +54,8 @@ export function localScan(symbol:string,data:Record<string,Bar[]>) {
    execution_scope:'CRT exits with the documented Giant Killer M15/H1 reversal-entry pattern. Numeric zone-strength/news rules from other sources are not invented.'});
   return finish(base);
  }
+ const active=base.local_diagnostics.find((d:any)=>d.reason!=='waiting_for_source_close');
+ const messages:Record<string,string>={prior_day_level_not_tested:'the prior-day level has not been tested',raid_and_close_back_missing:'the required raid and close-back are missing',reversal_or_structure_confirmation_missing:'the reversal/body-close structure is not confirmed',previous_day_context_not_ready:'the new trading-day context is incomplete'};
+ base.wait_summary=active?'WAIT — M15/H1 preset: '+(messages[active.reason] || 'no complete pattern')+'.':'WAIT — this preset enters at M15/H1 closes, not on every M1 check.';
  return finish(base);
 }

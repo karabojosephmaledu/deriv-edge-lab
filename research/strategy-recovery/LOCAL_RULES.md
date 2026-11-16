@@ -11,8 +11,8 @@ The local evaluator combines CRT's documented range-raid/confirmation pattern an
 Exact conditions:
 
 1. Read the previous closed Deriv daily bar as the previous trading-day range. This uses the provider's daily boundary, not an invented local-session clock.
-2. A closed M15/H1 CRT range candle must touch that prior-day extreme **exactly**. No arbitrary zone width/touch tolerance is introduced.
-3. The following candle must raid that extreme and close back inside the CRT range.
+2. A closed M15/H1 CRT range candle must test the actual prior-day extreme and close on its valid side: its low reaches or crosses the prior-day low and closes above it for a buy, or its high reaches or crosses the prior-day high and closes below it for a sell. The original exact-price-equality restriction was an implementation error, not a document requirement. No arbitrary zone width/touch tolerance is introduced.
+3. The following candle must raid beyond the range candle's extreme, close back inside the CRT range, and also reclaim the prior-day level on its valid side.
 4. The next three candles must reverse with the documented opposite body colour. Their successive highs/lows must also show unambiguous HH/HL or LH/LL structure, and the final body must close beyond the raid candle's opposite extreme. The existing global clear-structure requirement is still applied.
 5. The current closed M1 timestamp must coincide with that final source-candle close. Old signals are not chased later.
 6. CRT provides the stop beyond the raid extreme and target at the opposite **CRT range candle** extreme. Actual closed OHLC anchors are returned; the existing broker adapter places its one-price-increment outside stop and verifies actual quote barriers. The admissible quote interval lies between the raid-break level and the final confirmation candle's already-observed extreme. This is a conservative executable bound, not a claim that the PDFs specify a universal fill tolerance.
@@ -32,3 +32,5 @@ Read-only provider checks returned Multiplier contracts for XAUUSD, BTCUSD, EURU
 Tests cover mirrored valid patterns, rejected incomplete patterns, wrong source timeframes, source/evidence attribution, no network calls in local analysis, no-key startup, selected-market isolation, unsupported/closed markets, session gaps, frozen watchlists, price-display rotation, actual settlements and existing account/session protections. A real Python → Node worker smoke check completed with all six AI-slot keys absent and evaluated all 17 source records. Public discovery verified 19 market records in about 2.6 seconds; 15 had Multiplier contracts and four requested stock indices did not.
 
 No authenticated broker orders or profitable backtest claims are part of these checks. Further discretionary strategies need complete mechanical definitions and separate validation before being marked executable. The source documents remain available for that work.
+
+The per-market status now explains whether the source candle is still open, the prior-day level was not tested, the raid/close-back is missing, or the reversal structure is incomplete. Between source closes it reports the next M15/H1 boundary in the browser's local time. These diagnostics do not authorize an entry. See [the waiting audit](WAIT_AUDIT.md) for the public-data trigger counts and their limits.

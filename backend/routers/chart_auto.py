@@ -37,7 +37,7 @@ def flags():
         "real_enabled":enabled and os.environ.get("DERIV_LIVE_TRADING_ENABLED","").lower()=="true",
         "ai_configured":any(os.environ.get(f"CHART_AI_SLOT_{n}_API_KEY") for n in range(1,7)),
         **runtime_status(), "product":"Options Multipliers", "analysis_engine":"local_rules","ai_required":False,
-        "cadence_seconds":ENTRY_FRAME,"analysis_timeout_seconds":SCAN_TIMEOUT}
+        "cadence_seconds":ENTRY_FRAME,"analysis_timeout_seconds":SCAN_TIMEOUT,"entry_timeframes":["M15","H1"]}
 
 
 class AutoConfig(BaseModel):
@@ -399,17 +399,18 @@ class Runtime:
                             r.activity("analysing","Checking local rules on "+info.get("name",symbol)+". No AI credits used.");await self.save(r)
                             result=await self.analyze(symbol,frames,None)
                             r.analysis=result;r.last_check_at=time.time();r.next_check_at=int(time.time())//ENTRY_FRAME*ENTRY_FRAME+ENTRY_FRAME
-                            r.activity("waiting","WAIT — no complete locally verified setup on "+info.get("name",symbol)+".")
+                            r.activity("waiting",result.get("wait_summary") or "WAIT — no complete locally verified setup on "+info.get("name",symbol)+".")
                             settled_before=len(r.history)
-                            try:await self.entry(r,frames,result)
+                            try:
+                                if result.get("verdict") in {"BUY_NOW","SELL_NOW"}:await self.entry(r,frames,result)
                             except DemoError as exc:
                                 if exc.status!=409:raise
                                 r.note=str(exc)
-                            r.market_status[symbol]={"symbol":symbol,"name":info.get("name",symbol),"verdict":"TRADED" if len(r.history)>settled_before else "WAIT","analysis_verdict":result.get("verdict","WAIT"),"note":r.note,"checked_at":time.time()}
+                            r.market_status[symbol]={"symbol":symbol,"name":info.get("name",symbol),"verdict":"TRADED" if len(r.history)>settled_before else "WAIT","analysis_verdict":result.get("verdict","WAIT"),"note":r.note,"rule_checks":result.get("local_diagnostics",[]),"checked_at":time.time()}
                             await self.save(r)
                             if int(time.time())//ENTRY_FRAME*ENTRY_FRAME-ENTRY_FRAME!=bar:break
                         r.cursor=(first+1)%len(r.cfg.symbols)
-                        if r.status=="running" and len(r.history)==before:r.activity("waiting","WAIT — selected markets checked; no complete eligible setup.")
+                        if r.status=="running" and len(r.history)==before:r.activity("waiting","WAIT — no eligible M15/H1 entry. Latest market checks show why.")
                         r.next_check_at=int(time.time())//ENTRY_FRAME*ENTRY_FRAME+ENTRY_FRAME
                 await asyncio.sleep(2)
         except asyncio.CancelledError:
